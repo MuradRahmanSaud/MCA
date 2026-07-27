@@ -84,7 +84,7 @@ export default function MCCoursePanel({
       extraFormProps={{
         onSaveBatch: onSaveBatch,
         onSaveDocument: onSaveDocument,
-        batchHeaders: ["Batch Number", "Start Date", "End Date", "Student", "Instractor"],
+        batchHeaders: ["Batch Number", "Start Date", "End Date", "Student", "Instractor", "Course Fee", "Discount"],
         documentHeaders: ["Date", "Documents Title", "File Link", "Tag"]
       }}
       initialExpanded={false}

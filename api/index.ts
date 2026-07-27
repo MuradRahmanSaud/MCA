@@ -215,6 +215,33 @@ async function handleData(req: express.Request, res: express.Response) {
 // Reusable and optimized data fetch with caching for ANY GID
 app.get("/api/data", handleData);
 
+// Blazing fast bulk sync for all connected Google Sheets simultaneously
+app.post("/api/sync-all", async (req, res) => {
+  const gids = req.body.gids || [
+    "0", "1972051572", "1120624852", "1111164355", 
+    "880522927", "732376789", "1007542549", "1686458334"
+  ];
+  const customSpreadsheetId = req.headers["x-spreadsheet-id"] as string;
+  const spreadsheetId = customSpreadsheetId || SPREADSHEET_ID;
+
+  const results: Record<string, any> = {};
+  await Promise.all(
+    gids.map(async (gid: string) => {
+      try {
+        dynamicCache.delete(`${spreadsheetId}_${gid}`);
+        const data = await refreshDynamicCache(gid, spreadsheetId);
+        results[gid] = data;
+      } catch (err: any) {
+        console.warn(`Sync all failed for GID ${gid}:`, err.message);
+        const cached = dynamicCache.get(`${spreadsheetId}_${gid}`);
+        results[gid] = cached ? cached.data : [];
+      }
+    })
+  );
+
+  res.json({ success: true, results });
+});
+
 app.get("/api/settings-data", async (req, res) => {
   // Backwards compatibility mapped to the dynamic query
   req.query.gid = SETTINGS_GID;

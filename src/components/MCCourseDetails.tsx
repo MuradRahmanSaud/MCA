@@ -111,6 +111,9 @@ interface MCCourseDetailsProps {
     onSaveDocument?: (formData: any, editingRow: any | null) => Promise<void>;
     batchHeaders?: string[];
     documentHeaders?: string[];
+    expensesData?: any[];
+    onSaveExpense?: (formData: any, editingRow: any | null) => Promise<void>;
+    expensesHeaders?: string[];
   };
   initialExpanded?: boolean;
   headers?: string[];
@@ -168,7 +171,9 @@ export default function MCCourseDetails({
             "Start Date": "",
             "End Date": "",
             "Student": "",
-            "Instractor": ""
+            "Instractor": "",
+            "Course Fee": editedData?.["Course Fee"] !== undefined ? editedData["Course Fee"] : (data?.["Course Fee"] ?? ""),
+            "Discount": ""
           }
         ]);
       }, 100);
@@ -257,13 +262,7 @@ export default function MCCourseDetails({
         return;
       }
 
-      const hasAnyValid = newBatchesData.some(b => b["Start Date"] && b["End Date"]);
-      if (hasAnyValid) {
-        await handleAddBatch();
-      } else {
-        setIsAddBatchOpen(false);
-        setNewBatchesData([]);
-      }
+      // Do not auto-save on click outside. Let the user explicitly click the Save Batch button or Cancel.
     };
 
     document.addEventListener('mousedown', handleOutsideClick);
@@ -365,6 +364,58 @@ export default function MCCourseDetails({
       return editedBatches[key] || b;
     });
   }, [batches, data, localNewBatches, editedBatches]);
+
+  const totalBatchDiscountForDetails = useMemo(() => {
+    return courseBatches.reduce((sum, b) => {
+      const d = parseFloat(String(b["Discount"] || "0").replace(/[^0-9.]/g, ""));
+      const enrolledVal = b["Student"] || b["Enrolled"] || b["Enrollments"] || "0";
+      const enrolled = parseInt(String(enrolledVal).replace(/[^0-9.]/g, ""), 10) || 0;
+      return sum + (isNaN(d) ? 0 : d * enrolled);
+    }, 0);
+  }, [courseBatches]);
+
+  const courseFinancials = useMemo(() => {
+    let totalCourseFee = 0;
+    let totalEnrolled = 0;
+    let totalGrossRevenue = 0;
+    let totalDiscount = 0;
+    let totalExpenses = 0;
+
+    courseBatches.forEach(b => {
+      const feeVal = b["Course Fee"] !== undefined && b["Course Fee"] !== "" ? b["Course Fee"] : (data?.["Course Fee"] || "0");
+      const fee = parseFloat(String(feeVal).replace(/[^0-9.]/g, "")) || 0;
+
+      const enrolledVal = b["Student"] || b["Enrolled"] || b["Enrollments"] || "0";
+      const enrolled = parseInt(String(enrolledVal).replace(/[^0-9.]/g, ""), 10) || 0;
+
+      const discountVal = b["Discount"] || "0";
+      const discount = parseFloat(String(discountVal).replace(/[^0-9.]/g, "")) || 0;
+
+      const expensesVal = b["Expenses"] || "0";
+      const expenses = parseFloat(String(expensesVal).replace(/[^0-9.]/g, "")) || 0;
+
+      totalCourseFee += fee;
+      totalEnrolled += enrolled;
+      totalGrossRevenue += (fee * enrolled);
+      totalDiscount += (discount * enrolled);
+      totalExpenses += expenses;
+    });
+
+    const netRevenue = totalGrossRevenue - totalDiscount;
+    const netProfit = netRevenue - totalExpenses;
+    const profitMargin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
+
+    return {
+      courseFee: totalCourseFee,
+      enrolled: totalEnrolled,
+      grossRevenue: totalGrossRevenue,
+      discount: totalDiscount,
+      netRevenue,
+      expenses: totalExpenses,
+      netProfit,
+      profitMargin
+    };
+  }, [courseBatches, data]);
 
   const handleSelectBatchWithAutoSave = async (clickedIndex: number, clickedBatchKey: string) => {
     const previousKey = inlineEditingBatchKey;
@@ -543,13 +594,13 @@ export default function MCCourseDetails({
       value: (() => {
         const fee = parseFloat(String(editedData?.['Course Fee'] || "0").replace(/[^0-9.]/g, ""));
         const enrolled = parseInt(String(editedData?.['Enrolled'] || editedData?.['Enrollments'] || "0").replace(/[^0-9.]/g, ""), 10);
-        const discount = parseFloat(String(editedData?.['Discount'] || "0").replace(/[^0-9.]/g, ""));
+        const discount = totalBatchDiscountForDetails;
         const gross = isNaN(fee) || isNaN(enrolled) ? 0 : fee * enrolled;
         const net = gross - (isNaN(discount) ? 0 : discount);
         return net.toLocaleString();
       })()
     },
-    { key: 'Discount', icon: TrendingUp, label: 'Discount', value: editedData?.['Discount'] || '0' },
+    { key: 'Discount', icon: TrendingUp, label: 'Discount', value: totalBatchDiscountForDetails > 0 ? `৳ ${totalBatchDiscountForDetails.toLocaleString()}` : '0' },
     { key: 'Expenses', icon: TrendingUp, label: 'Expenses', value: editedData?.['Expenses'] || '0' },
     { 
       key: 'Net Profit', 
@@ -558,7 +609,7 @@ export default function MCCourseDetails({
       value: (() => {
         const fee = parseFloat(String(editedData?.['Course Fee'] || "0").replace(/[^0-9.]/g, ""));
         const enrolled = parseInt(String(editedData?.['Enrolled'] || editedData?.['Enrollments'] || "0").replace(/[^0-9.]/g, ""), 10);
-        const discount = parseFloat(String(editedData?.['Discount'] || "0").replace(/[^0-9.]/g, ""));
+        const discount = totalBatchDiscountForDetails;
         const expenses = parseFloat(String(editedData?.['Expenses'] || "0").replace(/[^0-9.]/g, ""));
         const gross = isNaN(fee) || isNaN(enrolled) ? 0 : fee * enrolled;
         const net = gross - (isNaN(discount) ? 0 : discount);
@@ -573,7 +624,7 @@ export default function MCCourseDetails({
       value: (() => {
         const fee = parseFloat(String(editedData?.['Course Fee'] || "0").replace(/[^0-9.]/g, ""));
         const enrolled = parseInt(String(editedData?.['Enrolled'] || editedData?.['Enrollments'] || "0").replace(/[^0-9.]/g, ""), 10);
-        const discount = parseFloat(String(editedData?.['Discount'] || "0").replace(/[^0-9.]/g, ""));
+        const discount = totalBatchDiscountForDetails;
         const expenses = parseFloat(String(editedData?.['Expenses'] || "0").replace(/[^0-9.]/g, ""));
         const gross = isNaN(fee) || isNaN(enrolled) ? 0 : fee * enrolled;
         const net = gross - (isNaN(discount) ? 0 : discount);
@@ -673,6 +724,12 @@ export default function MCCourseDetails({
           }
           if (batchesToSave.length > 0) {
             for (const batchData of batchesToSave) {
+              const batchKey = batchData["Batch Number"] || batchData["id"] || batchData["ID"];
+              if (editedBatches[batchKey]) {
+                // If this batch has been edited/modified in the active session, it is already processed.
+                // Skipping to prevent saving a duplicate unedited/stale row.
+                continue;
+              }
               promises.push(extraFormProps.onSaveBatch(batchData, null));
             }
           }
@@ -796,7 +853,7 @@ export default function MCCourseDetails({
                     return (
                       <div className={cn(
                         "w-full relative bg-teal-900 flex items-center justify-center overflow-hidden rounded-lg transition-all duration-200",
-                        isEditing ? "min-h-[240px] md:min-h-[220px]" : "min-h-[140px] md:min-h-[150px]"
+                        "min-h-[140px] md:min-h-[150px]"
                       )}>
                         {displayUrl ? (
                           <img
@@ -810,7 +867,10 @@ export default function MCCourseDetails({
                         )}
                         
                         {/* Glass Effect Overlay covering the ENTIRE banner */}
-                        <div className="absolute inset-0 z-10 bg-black/30 backdrop-blur-md border border-white/10 p-3 md:p-3.5 flex flex-col justify-between rounded-lg">
+                        <div className={cn(
+                          "absolute inset-0 z-10 bg-black/30 backdrop-blur-md border border-white/10 flex flex-col justify-between rounded-lg transition-all duration-200",
+                          isEditing ? "p-2.5 md:p-3" : "p-3 md:p-3.5"
+                        )}>
                           {/* Top Row: Left Expand/Collapse & Right Actions */}
                           <div className="flex items-center justify-between w-full z-20">
                             <div>
@@ -853,7 +913,7 @@ export default function MCCourseDetails({
                             )}
 
                             {isEditing && (
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1.5">
                                 <button 
                                   onClick={() => {
                                     setIsEditing(false);
@@ -871,16 +931,16 @@ export default function MCCourseDetails({
                                     }
                                   }}
                                   disabled={isSubmitting}
-                                  className="px-2.5 py-1 text-[13px] font-medium text-white bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 rounded-md transition-all uppercase disabled:opacity-50 cursor-pointer"
+                                  className="px-2 py-0.5 text-[10.5px] font-semibold text-white bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/20 rounded transition-all uppercase disabled:opacity-50 cursor-pointer h-6 flex items-center"
                                 >
                                   Cancel
                                 </button>
                                 <button 
                                   onClick={handleSave} 
                                   disabled={isSubmitting}
-                                  className="flex items-center gap-1.5 px-3 py-1 bg-teal-500 hover:bg-teal-600 text-white rounded-md border border-teal-400 text-[13px] font-medium uppercase tracking-wider transition-all disabled:opacity-50 shadow-lg cursor-pointer"
+                                  className="flex items-center gap-1 px-2.5 py-0.5 bg-teal-500 hover:bg-teal-600 text-white rounded border border-teal-400 text-[10.5px] font-bold uppercase tracking-wider transition-all disabled:opacity-50 shadow cursor-pointer h-6"
                                 >
-                                  {isSubmitting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                                  {isSubmitting ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <Save className="w-2.5 h-2.5" />}
                                   Save
                                 </button>
                               </div>
@@ -888,31 +948,31 @@ export default function MCCourseDetails({
                           </div>
 
                           {/* Bottom Row: Course Info & Title */}
-                          <div className="flex flex-col gap-2 w-full mt-2">
-                            <div className="flex flex-col md:flex-row md:items-end justify-between gap-2">
+                          <div className={cn("flex flex-col w-full mt-1", isEditing ? "gap-1" : "gap-2")}>
+                            <div className="flex flex-col md:flex-row md:items-end justify-between gap-1.5">
                               <div className="flex flex-col min-w-0 flex-1">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="px-1.5 py-0.5 bg-teal-500 text-white text-[10px] font-bold uppercase tracking-wider rounded shadow-xs">
+                                <div className="flex items-center gap-2 mb-0.5">
+                                  <span className="px-1.5 py-0.5 bg-teal-500 text-white text-[9px] font-bold uppercase tracking-wider rounded shadow-xs">
                                     {editedData?.['Mode'] || data?.['Mode'] || 'Online'}
                                   </span>
-                                  <span className="px-1.5 py-0.5 bg-white/10 text-white/90 text-[10px] font-bold uppercase tracking-wider rounded border border-white/10">
+                                  <span className="px-1.5 py-0.5 bg-white/10 text-white/90 text-[9px] font-bold uppercase tracking-wider rounded border border-white/10">
                                     {editedData?.['Course Code'] || data?.['Course Code'] || 'CODE'}
                                   </span>
                                 </div>
-                                <div className="flex flex-col gap-1 w-full max-w-md">
+                                <div className="flex flex-col gap-0.5 w-full max-w-md">
                                   {isEditing ? (
-                                    <div className="flex flex-col gap-1">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-bold text-white/50 uppercase tracking-widest leading-none">Course Title</span>
+                                    <div className="flex flex-col gap-0.5">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-[8px] font-bold text-white/50 uppercase tracking-widest leading-none">Course Title</span>
                                         {editedData?.['Course Title'] !== data?.['Course Title'] && (
-                                          <span className="text-[9px] font-bold text-amber-300 animate-pulse uppercase tracking-widest bg-white/5 px-1 rounded border border-white/10">Changed</span>
+                                          <span className="text-[8px] font-bold text-amber-300 animate-pulse uppercase tracking-widest bg-white/5 px-1 rounded border border-white/10">Changed</span>
                                         )}
                                       </div>
                                       <input 
                                         type="text" 
                                         value={editedData?.['Course Title'] || ''} 
                                         onChange={(e) => handleInputChange('Course Title', e.target.value)}
-                                        className="bg-white/10 border border-white/20 rounded px-2 py-1 w-full outline-none focus:bg-white/20 transition-all text-white uppercase text-base md:text-lg font-medium"
+                                        className="bg-white/10 border border-white/20 rounded px-1.5 py-0.5 w-full outline-none focus:bg-white/20 transition-all text-white uppercase text-xs md:text-sm font-medium h-6"
                                       />
                                     </div>
                                   ) : (
@@ -923,15 +983,15 @@ export default function MCCourseDetails({
                                 </div>
 
                                 {/* Info Row: Status, Duration, Classes */}
-                                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 mt-1.5 text-white/80">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[9px] font-medium uppercase tracking-widest opacity-60">Status</span>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-white/80">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[8px] font-medium uppercase tracking-widest opacity-60">Status</span>
                                     {isEditing ? (
-                                      <div className="flex items-center gap-1.5">
+                                      <div className="flex items-center gap-1">
                                         <select 
                                           value={editedData?.['Status'] || ''} 
                                           onChange={(e) => handleInputChange('Status', e.target.value)}
-                                          className="bg-white/10 border border-white/20 rounded px-1 py-0.5 text-[12px] font-medium uppercase outline-none text-white appearance-none cursor-pointer min-w-[80px]"
+                                          className="bg-white/10 border border-white/20 rounded px-1 py-0.5 text-[10px] font-medium uppercase outline-none text-white appearance-none cursor-pointer min-w-[70px] h-[22px]"
                                         >
                                           <option value="Active" className="text-slate-900">Active</option>
                                           <option value="Inactive" className="text-slate-900">Inactive</option>
@@ -939,29 +999,29 @@ export default function MCCourseDetails({
                                           <option value="On Hold" className="text-slate-900">On Hold</option>
                                         </select>
                                         {editedData?.['Status'] !== data?.['Status'] && (
-                                          <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" title="Status Changed" />
+                                          <div className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" title="Status Changed" />
                                         )}
                                       </div>
                                     ) : (
-                                      <span className="text-[12px] font-medium uppercase">{editedData?.['Status'] || data?.['Status'] || 'Active'}</span>
+                                      <span className="text-[11px] font-medium uppercase">{editedData?.['Status'] || data?.['Status'] || 'Active'}</span>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[9px] font-medium uppercase tracking-widest opacity-60">Duration</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[8px] font-medium uppercase tracking-widest opacity-60">Duration</span>
                                     {isEditing ? (
-                                      <div className="flex items-center gap-1.5">
+                                      <div className="flex items-center gap-1">
                                         <input 
                                           type="number" 
                                           value={editedData?.['Duration'] || ''} 
                                           onChange={(e) => handleInputChange('Duration', e.target.value)}
-                                          className="bg-white/10 border border-white/20 rounded px-1 py-0.5 text-[12px] font-medium uppercase outline-none text-white w-20"
+                                          className="bg-white/10 border border-white/20 rounded px-1 py-0.5 text-[10px] font-medium uppercase outline-none text-white w-14 h-[22px]"
                                         />
                                         {editedData?.['Duration'] !== data?.['Duration'] && (
                                           <div className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />
                                         )}
                                       </div>
                                     ) : (
-                                      <span className="text-[12px] font-medium uppercase">
+                                      <span className="text-[11px] font-medium uppercase">
                                         {(() => {
                                           const raw = editedData?.['Duration'] || data?.['Duration'] || '—';
                                           if (raw === '—') return '—';
@@ -976,22 +1036,22 @@ export default function MCCourseDetails({
                                       </span>
                                     )}
                                   </div>
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[9px] font-medium uppercase tracking-widest opacity-60">Classes</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[8px] font-medium uppercase tracking-widest opacity-60">Classes</span>
                                     {isEditing ? (
-                                      <div className="flex items-center gap-1.5">
+                                      <div className="flex items-center gap-1">
                                         <input 
                                           type="text" 
                                           value={editedData?.['Class'] ?? editedData?.['No. of Class'] ?? ''} 
                                           onChange={(e) => handleInputChange(editedData?.['Class'] !== undefined || !('No. of Class' in (data || {})) ? 'Class' : 'No. of Class', e.target.value)}
-                                          className="bg-white/10 border border-white/20 rounded px-1 py-0.5 text-[12px] font-medium uppercase outline-none text-white w-12"
+                                          className="bg-white/10 border border-white/20 rounded px-1 py-0.5 text-[10px] font-medium uppercase outline-none text-white w-10 h-[22px]"
                                         />
                                         {(editedData?.['Class'] ?? editedData?.['No. of Class']) !== (data?.['Class'] ?? data?.['No. of Class']) && (
                                           <div className="w-1 h-1 rounded-full bg-amber-400 animate-pulse" />
                                         )}
                                       </div>
                                     ) : (
-                                      <span className="text-[12px] font-medium uppercase">{editedData?.['Class'] || editedData?.['No. of Class'] || data?.['Class'] || data?.['No. of Class'] || '—'}</span>
+                                      <span className="text-[11px] font-medium uppercase">{editedData?.['Class'] || editedData?.['No. of Class'] || data?.['Class'] || data?.['No. of Class'] || '—'}</span>
                                     )}
                                   </div>
                                 </div>
@@ -999,19 +1059,19 @@ export default function MCCourseDetails({
 
                               <div className="flex items-center gap-4 text-white/80 shrink-0">
                                 <div className="flex flex-col items-start md:items-end">
-                                  <span className="text-[10px] font-medium uppercase tracking-widest opacity-60">Category</span>
+                                  <span className="text-[8px] font-medium uppercase tracking-widest opacity-60">Category</span>
                                   {isEditing ? (
                                     <select
                                       value={editedData?.['Course Category'] || data?.['Course Category'] || 'Technical'}
                                       onChange={(e) => handleInputChange('Course Category', e.target.value)}
-                                      className="bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-[12px] font-medium uppercase outline-none text-white appearance-none cursor-pointer text-right"
+                                      className="bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase outline-none text-white appearance-none cursor-pointer text-right h-[22px]"
                                     >
                                       <option value="Technical" className="text-slate-900">Technical</option>
                                       <option value="Non-Technical" className="text-slate-900">Non-Technical</option>
                                       <option value="Professional" className="text-slate-900">Professional</option>
                                     </select>
                                   ) : (
-                                    <span className="text-[13px] font-medium uppercase">{editedData?.['Course Category'] || data?.['Course Category'] || 'Technical'}</span>
+                                    <span className="text-[12px] font-medium uppercase">{editedData?.['Course Category'] || data?.['Course Category'] || 'Technical'}</span>
                                   )}
                                 </div>
                               </div>
@@ -1071,38 +1131,78 @@ export default function MCCourseDetails({
                           </div>
                         </div>
                         {isEditing && (
-                          <button 
-                            id="add-batch-btn"
-                            onClick={async (e) => {
-                              e.stopPropagation();
-                              if (isAddBatchOpen) {
-                                const incompleteRow = newBatchesData.find(b => !b["Start Date"] || !b["End Date"]);
-                                if (incompleteRow) {
-                                  setBatchWarning("invalid");
-                                  return;
-                                }
-                                setBatchWarning(null);
-                                const nextNum = getNextBatchNumber(newBatchesData);
-                                setNewBatchesData(prev => [
-                                  ...prev,
-                                  {
-                                    "Batch Number": nextNum,
-                                    "Start Date": "",
-                                    "End Date": "",
-                                    "Student": "",
-                                    "Instractor": ""
+                          <div className="flex items-center gap-1.5">
+                            {isAddBatchOpen && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={async (e) => {
+                                    e.stopPropagation();
+                                    const incompleteRow = newBatchesData.find(b => !b["Start Date"] || !b["End Date"]);
+                                    if (incompleteRow) {
+                                      setBatchWarning("invalid");
+                                      return;
+                                    }
+                                    setBatchWarning(null);
+                                    await handleAddBatch();
+                                  }}
+                                  className="px-2 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-[10px] font-bold uppercase tracking-wider rounded flex items-center gap-1 transition-all active:scale-95"
+                                  title="Save Batch"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>Save Batch</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIsAddBatchOpen(false);
+                                    setNewBatchesData([]);
+                                    setBatchWarning(null);
+                                  }}
+                                  className="px-2 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-bold uppercase tracking-wider rounded flex items-center gap-1 transition-all active:scale-95"
+                                  title="Cancel"
+                                >
+                                  <X className="w-3 h-3" />
+                                  <span>Cancel</span>
+                                </button>
+                              </>
+                            )}
+                            <button 
+                              id="add-batch-btn"
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                if (isAddBatchOpen) {
+                                  const incompleteRow = newBatchesData.find(b => !b["Start Date"] || !b["End Date"]);
+                                  if (incompleteRow) {
+                                    setBatchWarning("invalid");
+                                    return;
                                   }
-                                ]);
-                              } else {
-                                setBatchWarning(null);
-                                setIsAddBatchOpen(true);
-                              }
-                            }} 
-                            className="p-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded transition-all active:scale-95" 
-                            title={isAddBatchOpen ? "Add Another Batch Row" : "Add Batch"}
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
+                                  setBatchWarning(null);
+                                  const nextNum = getNextBatchNumber(newBatchesData);
+                                  setNewBatchesData(prev => [
+                                    ...prev,
+                                    {
+                                      "Batch Number": nextNum,
+                                      "Start Date": "",
+                                      "End Date": "",
+                                      "Student": "",
+                                      "Instractor": "",
+                                      "Course Fee": editedData?.["Course Fee"] !== undefined ? editedData["Course Fee"] : (data?.["Course Fee"] ?? ""),
+                                      "Discount": ""
+                                    }
+                                  ]);
+                                } else {
+                                  setBatchWarning(null);
+                                  setIsAddBatchOpen(true);
+                                }
+                              }} 
+                              className="p-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded transition-all active:scale-95 flex items-center justify-center shrink-0" 
+                              title={isAddBatchOpen ? "Add Another Batch Row" : "Add Batch"}
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -1324,6 +1424,7 @@ export default function MCCourseDetails({
                                         allBatches={courseBatches}
                                         employees={employees} 
                                         isEditing={isEditing}
+                                        courseFee={editedData?.["Course Fee"] !== undefined ? editedData["Course Fee"] : (data?.["Course Fee"] ?? "")}
                                         onSaveBatch={async (batchData) => {
                                           if (isEditing) {
                                             const batchKey = batchData["Batch Number"] || batchData["id"] || batchData["ID"] || selectedBatchKey;
@@ -1343,6 +1444,9 @@ export default function MCCourseDetails({
                                             await extraFormProps.onSaveDocument(docData, originalRow);
                                           }
                                         }}
+                                        expensesData={extraFormProps?.expensesData}
+                                        onSaveExpense={extraFormProps?.onSaveExpense}
+                                        expensesHeaders={extraFormProps?.expensesHeaders}
                                       />
                                     );
                                   })()}
@@ -1966,85 +2070,149 @@ export default function MCCourseDetails({
                     animate={{ opacity: 1, x: 0 }}
                     exit={{ opacity: 0, x: -10 }}
                     transition={{ duration: 0.2 }}
-                    className="p-4 space-y-4"
+                    className="p-3 space-y-3"
                   >
-                    <div className="space-y-3">
-                      <h4 className="text-[11px] font-bold text-teal-800 bg-teal-50/80 px-3 py-1.5 rounded-lg uppercase tracking-[0.2em] border-b border-teal-100 mb-3">Financial Overview</h4>
-                      <div className="space-y-2 pl-2">
-                        {[
-                          { label: 'Course Fee', key: 'Course Fee', icon: Tag, type: 'input' },
-                          { label: 'Total Enrolled', key: 'Enrolled', icon: Users, type: 'input', operator: '×' },
-                          { label: 'Gross Revenue', key: 'Gross Revenue', icon: TrendingUp, type: 'result', operator: '=' },
-                          { label: 'Discount Allowed', key: 'Discount', icon: Percent, type: 'minus', operator: '−' },
-                          { label: 'Net Revenue', key: 'Net Revenue', icon: Banknote, type: 'result', operator: '=' },
-                          { label: 'Total Expenses', key: 'Expenses', icon: CreditCard, type: 'minus', operator: '−' },
-                          { label: 'Est. Net Profit', key: 'Net Profit', icon: Wallet, type: 'final', operator: '=' },
-                          { label: 'Profit Margin', key: 'Profit %', icon: PieChart, type: 'stat' }
-                        ].map((item) => {
-                          const computedValue = courseInfo.find(c => c.key === item.key)?.value;
-                          const isDynamic = ['Gross Revenue', 'Net Revenue', 'Net Profit', 'Profit %'].includes(item.key);
-                          const Icon = item.icon;
-                          
-                          const getColors = () => {
-                            if (item.type === 'minus') return 'text-rose-600 bg-rose-50/50 rounded px-1 -mx-1';
-                            if (item.type === 'result') return 'text-teal-700 font-bold';
-                            if (item.type === 'final') return 'text-emerald-700 font-bold bg-emerald-50 rounded px-1 -mx-1';
-                            if (item.type === 'stat') return 'text-indigo-600 font-bold';
-                            return 'text-slate-700';
-                          };
+                    <div>
+                      <h4 className="text-[11px] font-bold text-teal-800 bg-teal-50/80 px-3 py-1.5 rounded-lg uppercase tracking-[0.2em] border-b border-teal-100 mb-1.5">Cumulative Financials</h4>
+                      <p className="text-[9px] text-slate-400 px-1 mb-1">Calculated by summing metrics across all {courseBatches.length} active batches under this course.</p>
+                    </div>
 
-                          const textClass = getColors();
-                          
-                          return (
-                            <div key={item.key} className="flex items-center py-0.5 group">
-                              <div className="flex items-center gap-2 w-[120px] shrink-0">
-                                <Icon className={cn("w-3.5 h-3.5 shrink-0", 
-                                  item.type === 'minus' ? 'text-rose-400' : 
-                                  item.type === 'result' ? 'text-teal-500' : 
-                                  item.type === 'final' ? 'text-emerald-500' : 'text-slate-400'
-                                )} />
-                                <span className={cn("text-[11.5px] font-medium leading-tight pt-0.5", 
-                                  item.type === 'minus' ? 'text-rose-500' : 'text-slate-500'
-                                )}>
-                                  {item.label}
-                                </span>
-                              </div>
-                              <span className="text-[13px] font-medium text-slate-400 mx-1 pt-0.5">:</span>
-                              
-                              <div className="flex-1 flex items-center justify-end gap-1.5 min-w-0">
-                                {item.operator && (
-                                  <span className={cn(
-                                    "text-[10px] font-black shrink-0",
-                                    item.type === 'minus' ? "text-rose-400" : "text-slate-300"
-                                  )}>
-                                    {item.operator}
-                                  </span>
-                                )}
+                    {/* Main calculated cards */}
+                    <div className="grid grid-cols-4 gap-2">
+                      <div className="bg-white border border-slate-200 rounded-lg p-2 shadow-2xs flex flex-col justify-between">
+                        <div>
+                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Gross Revenue</span>
+                          <p className="text-[10.5px] font-bold text-slate-800 font-mono">৳ {courseFinancials.grossRevenue.toLocaleString()}</p>
+                        </div>
+                      </div>
 
-                                <div className="min-w-0">
-                                  {isEditing && !isDynamic ? (
-                                    <input
-                                      type="text"
-                                      value={editedData?.[item.key] || (item.key === 'Enrolled' ? editedData?.['Enrollments'] || '' : '')}
-                                      onChange={(e) => handleInputChange(item.key === 'Enrolled' ? (editedData?.['Enrolled'] !== undefined ? 'Enrolled' : 'Enrollments') : item.key, e.target.value)}
-                                      className="w-full text-[12px] font-bold text-slate-700 bg-slate-50 border-b border-slate-200 py-0.5 focus:border-teal-500 outline-none transition-all text-right"
-                                    />
-                                  ) : (
-                                    <span className={cn("text-[12px] font-medium leading-tight pt-0.5 break-words block text-right", textClass)}>
-                                      {isDynamic ? (
-                                        ['Gross Revenue', 'Net Revenue', 'Net Profit'].includes(item.key) ? `৳ ${computedValue || '0'}` : computedValue
-                                      ) : (
-                                        ['Course Fee', 'Discount', 'Expenses'].includes(item.key) ? `৳ ${editedData?.[item.key] || data?.[item.key] || '0'}` : (item.key === 'Enrolled' ? (editedData?.['Enrolled'] || editedData?.['Enrollments'] || data?.['Enrolled'] || data?.['Enrollments'] || '0') : (editedData?.[item.key] || data?.[item.key] || '0'))
-                                      )}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                      <div className="bg-white border border-slate-200 rounded-lg p-2 shadow-2xs flex flex-col justify-between">
+                        <div>
+                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Net Revenue</span>
+                          <p className="text-[10.5px] font-bold text-teal-600 font-mono">৳ {courseFinancials.netRevenue.toLocaleString()}</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 rounded-lg p-2 shadow-2xs flex flex-col justify-between">
+                        <div>
+                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Net Profit</span>
+                          <p className={cn("text-[10.5px] font-bold font-mono", courseFinancials.netProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                            {courseFinancials.netProfit < 0 ? "− " : ""}৳ {Math.abs(courseFinancials.netProfit).toLocaleString()}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="bg-white border border-slate-200 rounded-lg p-2 shadow-2xs flex flex-col justify-between">
+                        <div>
+                          <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Profit Margin</span>
+                          <p className={cn("text-[10.5px] font-extrabold font-mono", courseFinancials.netProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                            {courseFinancials.profitMargin.toFixed(1)}%
+                          </p>
+                        </div>
                       </div>
                     </div>
+
+                    {/* Breakdown details */}
+                    <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-2xs space-y-2">
+                      <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider block pb-1 border-b border-slate-100">
+                        Cumulative Inputs Summation
+                      </span>
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                          <span className="text-[10.5px] text-slate-500">Total Course Fee Sum</span>
+                          <span className="text-[11px] font-bold text-slate-800 font-mono">৳ {courseFinancials.courseFee.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                          <span className="text-[10.5px] text-slate-500">Total Enrolled Students</span>
+                          <span className="text-[11px] font-bold text-slate-800 font-mono">{courseFinancials.enrolled}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                          <span className="text-[10.5px] text-slate-500">Total Discount (∑ (Discount × Enrolled))</span>
+                          <span className="text-[11px] font-bold text-rose-600 font-mono">− ৳ {courseFinancials.discount.toLocaleString()}</span>
+                        </div>
+                        <div className="flex items-center justify-between py-0.5">
+                          <span className="text-[10.5px] text-slate-500">Total Expenses</span>
+                          <span className="text-[11px] font-bold text-rose-600 font-mono">− ৳ {courseFinancials.expenses.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Calculation Flows (super compact) */}
+                    <div className="bg-white border border-slate-200 rounded-lg p-3 shadow-2xs space-y-1.5">
+                      <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider block pb-1 border-b border-slate-100">
+                        Cumulative Flow Breakdown
+                      </span>
+                      <div className="space-y-1">
+                        <div className="p-1.5 bg-slate-50 border border-slate-100 rounded">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-[10px] font-bold text-slate-700">Gross Revenue</span>
+                            <span className="text-[10px] font-extrabold text-slate-800 font-mono">৳ {courseFinancials.grossRevenue.toLocaleString()}</span>
+                          </div>
+                          <p className="text-[8px] text-slate-400">Sum of (Fee × Enrolled) of all batches</p>
+                        </div>
+                        <div className="p-1.5 bg-slate-50 border border-slate-100 rounded">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-[10px] font-bold text-slate-700">Net Revenue</span>
+                            <span className="text-[10px] font-extrabold text-teal-700 font-mono">৳ {courseFinancials.netRevenue.toLocaleString()}</span>
+                          </div>
+                          <p className="text-[8px] text-slate-400 font-mono">Gross (৳{courseFinancials.grossRevenue.toLocaleString()}) − Discount (৳{courseFinancials.discount.toLocaleString()})</p>
+                        </div>
+                        <div className="p-1.5 bg-slate-50 border border-slate-100 rounded">
+                          <div className="flex items-center justify-between mb-0.5">
+                            <span className="text-[10px] font-bold text-slate-700">Net Profit</span>
+                            <span className={cn("text-[10px] font-extrabold font-mono", courseFinancials.netProfit >= 0 ? "text-emerald-700" : "text-rose-700")}>
+                              ৳ {courseFinancials.netProfit.toLocaleString()}
+                            </span>
+                          </div>
+                          <p className="text-[8px] text-slate-400 font-mono">Net (৳{courseFinancials.netRevenue.toLocaleString()}) − Expenses (৳{courseFinancials.expenses.toLocaleString()})</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Batch Breakdown Table */}
+                    {courseBatches.length > 0 && (
+                      <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs space-y-1">
+                        <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider block pb-1 border-b border-slate-100">
+                          Batch Contribution Details
+                        </span>
+                        <div className="max-h-[140px] overflow-y-auto no-scrollbar border border-slate-100 rounded">
+                          <table className="w-full text-left border-collapse">
+                            <thead>
+                              <tr className="bg-slate-50 border-b border-slate-100 text-[8px] text-slate-400 uppercase font-extrabold tracking-wider">
+                                <th className="p-1 pl-1.5">Batch</th>
+                                <th className="p-1 text-right">Fee</th>
+                                <th className="p-1 text-right">Enrolled</th>
+                                <th className="p-1 text-right">Disc.</th>
+                                <th className="p-1 text-right pr-1.5">Exp.</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {courseBatches.map((b, idx) => {
+                                const bNo = b["Batch Number"] || b["id"] || `B${idx + 1}`;
+                                const fVal = b["Course Fee"] !== undefined && b["Course Fee"] !== "" ? b["Course Fee"] : (data?.["Course Fee"] || "0");
+                                const f = parseFloat(String(fVal).replace(/[^0-9.]/g, "")) || 0;
+                                const sVal = b["Student"] || b["Enrolled"] || b["Enrollments"] || "0";
+                                const s = parseInt(String(sVal).replace(/[^0-9.]/g, ""), 10) || 0;
+                                const dVal = b["Discount"] || "0";
+                                const d = parseFloat(String(dVal).replace(/[^0-9.]/g, "")) || 0;
+                                const eVal = b["Expenses"] || "0";
+                                const e = parseFloat(String(eVal).replace(/[^0-9.]/g, "")) || 0;
+
+                                return (
+                                  <tr key={idx} className="border-b border-slate-50 text-[9px] hover:bg-slate-50/80">
+                                    <td className="p-1 pl-1.5 font-bold text-slate-700">#{bNo}</td>
+                                    <td className="p-1 text-right font-mono text-slate-600">৳{f.toLocaleString()}</td>
+                                    <td className="p-1 text-right font-mono text-slate-600">{s}</td>
+                                    <td className="p-1 text-right font-mono text-rose-500">৳{d.toLocaleString()}</td>
+                                    <td className="p-1 text-right font-mono text-rose-500 pr-1.5">৳{e.toLocaleString()}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </motion.div>
                 ) : activeSidebarTab === 'batches' ? (
                   <motion.div
@@ -2100,7 +2268,9 @@ export default function MCCourseDetails({
                               String(b['Batch Number'] || '').toLowerCase().includes(lowerSearch) ||
                               String(b['Start Date'] || '').toLowerCase().includes(lowerSearch) ||
                               String(b['End Date'] || '').toLowerCase().includes(lowerSearch) ||
-                              String(b['Student'] || '').toLowerCase().includes(lowerSearch)
+                              String(b['Student'] || '').toLowerCase().includes(lowerSearch) ||
+                              String(b['Course Fee'] || '').toLowerCase().includes(lowerSearch) ||
+                              String(b['Discount'] || '').toLowerCase().includes(lowerSearch)
                             );
                           }
 
@@ -2121,6 +2291,8 @@ export default function MCCourseDetails({
                                   <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-r border-slate-100 text-center">End Date</th>
                                   <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-r border-slate-100 text-center">Class Routine</th>
                                   <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-r border-slate-100 text-center">Student</th>
+                                  <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-r border-slate-100 text-center">Course Fee</th>
+                                  <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-r border-slate-100 text-center">Discount</th>
                                   <th className="px-3 py-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider text-center">Instructor</th>
                                 </tr>
                               </thead>
@@ -2189,6 +2361,12 @@ export default function MCCourseDetails({
                                         <td className="px-3 py-2.5 text-teal-600 font-bold text-center border-r border-slate-100">
                                           {batch["Student"] || "0"}
                                         </td>
+                                        <td className="px-3 py-2.5 text-slate-600 font-bold text-center border-r border-slate-100">
+                                          {batch["Course Fee"] ? `৳ ${Number(String(batch["Course Fee"]).replace(/[^0-9.]/g, '')).toLocaleString()}` : '—'}
+                                        </td>
+                                        <td className="px-3 py-2.5 text-slate-600 font-bold text-center border-r border-slate-100">
+                                          {batch["Discount"] ? `৳ ${Number(String(batch["Discount"]).replace(/[^0-9.]/g, '')).toLocaleString()}` : '—'}
+                                        </td>
                                         <td className="px-3 py-2.5 text-center">
                                           <div className="flex -space-x-1 items-center justify-center overflow-hidden py-0.5">
                                             {instructorsToRender.map((emp: any, i: number) => (
@@ -2212,13 +2390,14 @@ export default function MCCourseDetails({
                                       </tr>
                                       {isExpandedInline && (
                                         <tr>
-                                          <td colSpan={6} className="p-3 bg-slate-50 border-t border-b border-slate-200">
+                                          <td colSpan={8} className="p-3 bg-slate-50 border-t border-b border-slate-200">
                                             <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-3">
                                               <BatchDetailsView 
                                                 batch={batchToPass} 
                                                 allBatches={courseBatches}
                                                 employees={employees} 
                                                 isEditing={isEditing}
+                                                courseFee={editedData?.["Course Fee"] !== undefined ? editedData["Course Fee"] : (data?.["Course Fee"] ?? "")}
                                                 onSaveBatch={async (batchData) => {
                                                   if (isEditing) {
                                                     const batchKey = batchData["Batch Number"] || batchData["id"] || batchData["ID"] || selectedBatchKey;
@@ -2238,6 +2417,9 @@ export default function MCCourseDetails({
                                                     await extraFormProps.onSaveDocument(docData, originalRow);
                                                   }
                                                 }}
+                                                expensesData={extraFormProps?.expensesData}
+                                                onSaveExpense={extraFormProps?.onSaveExpense}
+                                                expensesHeaders={extraFormProps?.expensesHeaders}
                                               />
                                             </div>
                                           </td>

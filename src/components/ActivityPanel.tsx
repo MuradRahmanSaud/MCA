@@ -259,11 +259,11 @@ export default function ActivityPanel({
   const [isEditing, setIsEditing] = useState(false);
 
   const getDocStatus = (doc: any) => {
-    if (!doc) return { text: "Review", color: "bg-teal-100 text-teal-800" };
+    if (!doc) return { text: "Pending", color: "bg-transparent text-slate-500 font-bold" };
     const tag = String(doc["Tag"] || doc["Status"] || "");
-    if (tag.includes("Revision Required") || tag.includes("Revision")) return { text: "Revision", color: "bg-amber-100 text-amber-800" };
-    if (tag.includes("Verified") || tag.includes("Job Done") || tag.includes("Approved")) return { text: "Verified", color: "bg-green-100 text-green-800" };
-    return { text: "Review", color: "bg-teal-100 text-teal-800" };
+    if (tag.includes("Revision Required") || tag.includes("Revision")) return { text: "Revision", color: "bg-transparent text-amber-600 font-bold" };
+    if (tag.includes("Verified") || tag.includes("Job Done") || tag.includes("Approved")) return { text: "Verified", color: "bg-transparent text-emerald-600 font-bold" };
+    return { text: "Review", color: "bg-transparent text-teal-600 font-bold" };
   };
 
   const getAnyDocForActivity = (row: any) => {
@@ -768,7 +768,7 @@ export default function ActivityPanel({
           columnStyles={{
             "Photo": "w-10 text-center",
             "Employee Name": "w-px whitespace-nowrap",
-            "Stage & Deliverables": "w-full normal whitespace-normal break-words text-gray-900",
+            "Stage & Deliverables": "w-full normal whitespace-normal break-words",
             "Assigned Date": "w-px whitespace-nowrap text-center",
             "Deadline": "w-px whitespace-nowrap text-center",
             "Status": "w-px whitespace-nowrap text-center"
@@ -836,7 +836,7 @@ export default function ActivityPanel({
               return (
                 <div className="flex items-center justify-center">
                   <button 
-                    className={`${docStatus.color} text-[10px] px-2 py-0.5 rounded-full font-bold hover:opacity-80 cursor-pointer shadow-sm`}
+                    className={`${docStatus.color} text-[10px] hover:opacity-80 cursor-pointer bg-transparent`}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (onViewFile && doc && doc["File Link"]) {

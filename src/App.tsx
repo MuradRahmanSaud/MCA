@@ -151,7 +151,7 @@ export default function App() {
     fallbackHeaders: [
       "Course Code", "Course Title", "Banner", "Mode", "Duration", "Class",
       "Course Fee", "Student Size", "Status", "Workflow",
-      "Industry Expert", "Batches", "Enrolled", "Discount", "Expenses",
+      "Industry Expert", "Discount",
       "Remarks"
     ]
   });
@@ -169,7 +169,7 @@ export default function App() {
     gid: mcBatchGid,
     localStorageKey: "mc_batch_data",
     fallbackHeaders: [
-      "Course Code", "Batch Number", "Start Date", "End Date", "Student", "Instractor", "Routine"
+      "Course Code", "Batch Number", "Start Date", "End Date", "Student", "Instractor", "Routine", "Course Fee", "Discount"
     ]
   });
 
@@ -227,6 +227,7 @@ export default function App() {
   // Documents Sheet
   const {
     data: documentsData,
+    setData: setDocumentsData,
     headers: documentsHeaders,
     isLoading: isDocumentsLoading,
     fetchData: fetchDocumentsData,
@@ -241,6 +242,7 @@ export default function App() {
   // Expenses Sheet
   const {
     data: expensesData,
+    setData: setExpensesData,
     headers: expensesHeaders,
     isLoading: isExpensesLoading,
     fetchData: fetchExpensesData,
@@ -255,6 +257,7 @@ export default function App() {
   // Workflow Sheet
   const {
     data: workflowData,
+    setData: setWorkflowData,
     headers: workflowHeaders,
     isLoading: isWorkflowLoading,
     fetchData: fetchWorkflowData,
@@ -293,7 +296,8 @@ export default function App() {
     const hiddenHeaders = [
       "Banner", "Received By", "Gross Revenue", "Net Revenue", "Remarks", 
       "Proposed By", "Developed By", "Reviewed By", "Approved By", "Published By",
-      "Workflow", "Discount", "Expenses", "Net Profit", "Profit %", "Industry Expert", "Industry Expart"
+      "Workflow", "Expenses", "Net Profit", "Profit %", "Industry Expert", "Industry Expart",
+      "Enrolled", "Enrollments", "Expenses", "Batches"
     ];
     // Explicitly filter out "Status", "Batches", "Gross Revenue", "Net Revenue", "Net Profit", "Profit %" and hidden headers to avoid duplicates
     const baseHeaders = courseHeaders.filter(h => 
@@ -303,7 +307,10 @@ export default function App() {
       h !== "Gross Revenue" && 
       h !== "Net Revenue" && 
       h !== "Net Profit" && 
-      h !== "Profit %"
+      h !== "Profit %" &&
+      h !== "Enrolled" &&
+      h !== "Enrollments" &&
+      h !== "Expenses"
     );
     
     // Find Mode index and insert "Status" after it
@@ -317,24 +324,30 @@ export default function App() {
       updatedHeaders.push("Status");
     }
 
-    // Insert Batches before Enrolled or Enrollments
-    const enrolledIdx = updatedHeaders.indexOf("Enrolled");
-    const enrolledActualIdx = enrolledIdx !== -1 ? enrolledIdx : updatedHeaders.indexOf("Enrollments");
-    
-    if (enrolledActualIdx !== -1) {
-      updatedHeaders.splice(enrolledActualIdx, 0, "Batches");
-    } else {
-      updatedHeaders.push("Batches");
-    }
-
     return updatedHeaders;
   }, [courseHeaders]);
 
   const enrichedCourseData = useMemo(() => {
     return courseData.map(course => {
       const fee = parseFloat(String(course["Course Fee"] || "0").replace(/[^0-9.]/g, ""));
-      const enrolled = parseInt(String(course["Enrolled"] || course["Enrollments"] || "0").replace(/[^0-9.]/g, ""), 10);
-      const discount = parseFloat(String(course["Discount"] || "0").replace(/[^0-9.]/g, ""));
+      const courseBatches = enrichedMcBatchData.filter(b => 
+        String(b['Course Code'] || '').trim().toLowerCase() === String(course['Course Code'] || '').trim().toLowerCase() ||
+        String(b['Course Name'] || '').trim().toLowerCase() === String(course['Course Title'] || '').trim().toLowerCase()
+      );
+
+      const totalBatchStudents = courseBatches.reduce((sum, b) => {
+        const s = parseInt(String(b["Student"] || b["Students"] || "0").replace(/[^0-9.]/g, ""), 10);
+        return sum + (isNaN(s) ? 0 : s);
+      }, 0);
+
+      const enrolled = parseInt(String(course["Enrolled"] || course["Enrollments"] || totalBatchStudents || "0").replace(/[^0-9.]/g, ""), 10);
+
+      const totalDiscount = courseBatches.reduce((sum, b) => {
+        const d = parseFloat(String(b["Discount"] || "0").replace(/[^0-9.]/g, ""));
+        return sum + (isNaN(d) ? 0 : d);
+      }, 0);
+
+      const discount = totalDiscount;
       const expenses = parseFloat(String(course["Expenses"] || "0").replace(/[^0-9.]/g, ""));
       
       const grossRevenue = isNaN(fee) || isNaN(enrolled) ? 0 : fee * enrolled;
@@ -342,10 +355,11 @@ export default function App() {
       const netProfit = netRevenue - (isNaN(expenses) ? 0 : expenses);
       const profitMargin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
       
-      const courseBatchesCount = enrichedMcBatchData.filter(b => b['Course Code'] === course['Course Code'] || b['Course Name'] === course['Course Title']).length;
+      const courseBatchesCount = courseBatches.length;
 
       return {
         ...course,
+        "Discount": totalDiscount > 0 ? `৳ ${totalDiscount.toLocaleString()}` : '0',
         "Status": getCourseStatusName(course, documentsData, workflowData),
         "Batches": courseBatchesCount.toString(),
         "Gross Revenue": `৳ ${grossRevenue.toLocaleString()}`,
@@ -525,6 +539,55 @@ export default function App() {
   const handleSyncAll = async () => {
     setIsSyncing(true);
     try {
+      const gids = [
+        employeeGid, 
+        settingsGid, 
+        "1120624852", 
+        mcBatchGid, 
+        "880522927", 
+        "732376789", 
+        expensesGid, 
+        "1686458334"
+      ];
+      const headers = getDbOverridesHeaders();
+      const response = await axios.post("/api/sync-all", { gids }, { headers });
+      const results = response.data?.results;
+      if (results) {
+        if (results[employeeGid]) {
+          setData(results[employeeGid]);
+          localStorage.setItem("workforce_data", JSON.stringify(results[employeeGid]));
+        }
+        if (results[settingsGid]) {
+          setSettingsData(results[settingsGid]);
+          localStorage.setItem("settings_data", JSON.stringify(results[settingsGid]));
+        }
+        if (results["1120624852"]) {
+          setCourseData(results["1120624852"]);
+          localStorage.setItem("course_data", JSON.stringify(results["1120624852"]));
+        }
+        if (results[mcBatchGid]) {
+          setMcBatchData(results[mcBatchGid]);
+          localStorage.setItem("mc_batch_data", JSON.stringify(results[mcBatchGid]));
+        }
+        if (results["880522927"]) {
+          setRoutineSlotsData(results["880522927"]);
+          localStorage.setItem("routine_slots_data", JSON.stringify(results["880522927"]));
+        }
+        if (results["732376789"]) {
+          setDocumentsData(results["732376789"]);
+          localStorage.setItem("documents_data", JSON.stringify(results["732376789"]));
+        }
+        if (results[expensesGid]) {
+          setExpensesData(results[expensesGid]);
+          localStorage.setItem("expenses_data", JSON.stringify(results[expensesGid]));
+        }
+        if (results["1686458334"]) {
+          setWorkflowData(results["1686458334"]);
+          localStorage.setItem("workflow_data", JSON.stringify(results["1686458334"]));
+        }
+      }
+    } catch (error) {
+      console.error("Sync all failed, falling back to individual fetch:", error);
       await Promise.all([
         fetchData(true),
         fetchSettingsData(true),
@@ -534,8 +597,6 @@ export default function App() {
         fetchExpensesData(true),
         fetchWorkflowData(true)
       ]);
-    } catch (error) {
-      console.error("Sync all failed:", error);
     } finally {
       setIsSyncing(false);
     }
@@ -1085,7 +1146,10 @@ export default function App() {
                                     onSaveBatch: handleMCBatchSave,
                                     onSaveDocument: handleDocumentSave,
                                     batchHeaders: mcBatchHeaders,
-                                    documentHeaders: documentsHeaders
+                                    documentHeaders: documentsHeaders,
+                                    expensesData: expensesData,
+                                    onSaveExpense: handleExpenseSave,
+                                    expensesHeaders: expensesHeaders
                                   }}
                                   initialExpanded={isCourseDetailsExpanded}
                                 />

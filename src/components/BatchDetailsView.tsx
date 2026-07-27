@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { resolveNamesOrIdsToIds, isBatchRunning, formatToMmmDdYyyy, parseWorkflowAndStages, getStageAssignment, cn, serializeWorkflowAndStages, parseWorkflowTitle } from "../lib/utils";
-import { Users, Calendar, Info, Briefcase, FileText, Plus, Clock, Save, Check, ExternalLink, Trash2, Edit3, X, Search, ChevronDown, Video, Building2 } from "lucide-react";
+import { Users, Calendar, Info, Briefcase, FileText, Plus, Clock, Save, Check, ExternalLink, Trash2, Edit3, X, Search, ChevronDown, Video, Building2, DollarSign, TrendingUp, Percent, Coins, TrendingDown, Wallet, Banknote, Upload } from "lucide-react";
+import axios from "axios";
+import { FOLDER_LOCATIONS } from "../FolderLocation";
 import EmployeeMultiSelect from "./EmployeeMultiSelect";
 import WorkflowTimeline from "./WorkflowTimeline";
 import { motion, AnimatePresence } from "motion/react";
@@ -373,9 +375,26 @@ export interface BatchDetailsViewProps {
   workflowData?: any[];
   documents?: any[];
   onSaveDocument?: (formData: any, editingRow: any | null) => Promise<void>;
+  courseFee?: any;
+  expensesData?: any[];
+  onSaveExpense?: (formData: any, editingRow: any | null) => Promise<void>;
+  expensesHeaders?: string[];
 }
 
-export default function BatchDetailsView({ batch, allBatches, employees, isEditing, onSaveBatch, workflowData = [], documents = [], onSaveDocument }: BatchDetailsViewProps) {
+export default function BatchDetailsView({ 
+  batch, 
+  allBatches, 
+  employees, 
+  isEditing, 
+  onSaveBatch, 
+  workflowData = [], 
+  documents = [], 
+  onSaveDocument, 
+  courseFee,
+  expensesData,
+  onSaveExpense,
+  expensesHeaders
+}: BatchDetailsViewProps) {
   const [activeTab, setActiveTab] = useState<'info' | 'routine' | 'workflow' | 'documents' | 'financial'>('info');
   const [documentFilter, setDocumentFilter] = useState<string | null>(null);
   
@@ -400,6 +419,119 @@ export default function BatchDetailsView({ batch, allBatches, employees, isEditi
 
   const [isSavingRoutine, setIsSavingRoutine] = useState<boolean>(false);
   const [routineSavedSuccess, setRoutineSavedSuccess] = useState<boolean>(false);
+
+  // Voucher and Expenses Form states
+  const [showVoucherForm, setShowVoucherForm] = useState<boolean>(false);
+  const [voucherTitle, setVoucherTitle] = useState<string>("");
+  const [voucherAmount, setVoucherAmount] = useState<string>("");
+  const [voucherDate, setVoucherDate] = useState<string>("");
+  const [voucherFileUrl, setVoucherFileUrl] = useState<string>("");
+  const [isUploadingVoucher, setIsUploadingVoucher] = useState<boolean>(false);
+  const [isSavingVoucher, setIsSavingVoucher] = useState<boolean>(false);
+
+  const calculatedExpensesSum = useMemo(() => {
+    if (!expensesData || !Array.isArray(expensesData)) {
+      const expensesVal = batch?.["Expenses"] || "0";
+      return parseFloat(String(expensesVal).replace(/[^0-9.]/g, "")) || 0;
+    }
+    const targetTag = `${batch?.["Course Code"] || ""}-${batch?.["Batch Number"] || ""}`.trim().toLowerCase();
+    return expensesData.reduce((sum, item) => {
+      const itemTag = String(item["Tag"] || "").trim().toLowerCase();
+      if (itemTag === targetTag) {
+        const amountVal = parseFloat(String(item["Amount"] || "0").replace(/[^0-9.]/g, ""));
+        return sum + (isNaN(amountVal) ? 0 : amountVal);
+      }
+      return sum;
+    }, 0);
+  }, [expensesData, batch]);
+
+  // Synchronize dynamic calculated expenses to the batch "Expenses" property
+  useEffect(() => {
+    if (isEditing && onSaveBatch && calculatedExpensesSum !== undefined) {
+      const currentBatchExpenses = parseFloat(String(batch?.["Expenses"] || "0").replace(/[^0-9.]/g, "")) || 0;
+      if (calculatedExpensesSum !== currentBatchExpenses) {
+        onSaveBatch({
+          ...batch,
+          "Expenses": String(calculatedExpensesSum)
+        });
+      }
+    }
+  }, [calculatedExpensesSum, isEditing, batch, onSaveBatch]);
+
+  const formatDateForFileName = (dateStr: string) => {
+    if (!dateStr) return "";
+    try {
+      const date = new Date(dateStr);
+      return new Intl.DateTimeFormat('en-US', {
+        month: 'short',
+        day: '2-digit',
+        year: 'numeric'
+      }).format(date);
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
+  const handleVoucherFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingVoucher(true);
+    const formDataUpload = new FormData();
+    const formattedDate = formatDateForFileName(voucherDate);
+    const title = voucherTitle || "Expense";
+    const newFileName = formattedDate ? `${title} - ${formattedDate} - ${file.name}` : `${title} - ${file.name}`;
+    
+    formDataUpload.append("file", file);
+    formDataUpload.append("folderPath", FOLDER_LOCATIONS.EXPENSES_VOUCHER);
+    formDataUpload.append("departmentName", newFileName.replace(/\.[^/.]+$/, "")); 
+
+    try {
+      const response = await axios.post("/api/upload", formDataUpload, { timeout: 60000 });
+      const uploadedUrl = response.data?.url || response.data?.fileLink;
+      if (uploadedUrl) {
+        let viewUrl = uploadedUrl;
+        if (viewUrl.includes("drive.google.com/uc") || viewUrl.includes("export=download")) {
+          const fileIdMatch = viewUrl.match(/[?&]id=([^&]+)/);
+          if (fileIdMatch && fileIdMatch[1]) {
+            viewUrl = `https://drive.google.com/file/d/${fileIdMatch[1]}/view`;
+          }
+        }
+        setVoucherFileUrl(viewUrl);
+      }
+    } catch (error) {
+      console.error("Upload failed:", error);
+      alert("Upload failed. Please try again.");
+    } finally {
+      setIsUploadingVoucher(false);
+    }
+  };
+
+  const handleSaveVoucherSubmit = async () => {
+    if (!voucherTitle || !voucherAmount) return;
+    setIsSavingVoucher(true);
+    try {
+      if (onSaveExpense) {
+        const tag = `${batch?.["Course Code"] || ""}-${batch?.["Batch Number"] || ""}`;
+        const newVoucher = {
+          "Date": voucherDate || new Date().toISOString().split('T')[0],
+          "Expenses Title": voucherTitle,
+          "Amount": voucherAmount,
+          "Voucher": voucherFileUrl,
+          "Tag": tag
+        };
+        await onSaveExpense(newVoucher, null);
+        setShowVoucherForm(false);
+        setVoucherTitle("");
+        setVoucherAmount("");
+        setVoucherFileUrl("");
+      }
+    } catch (e) {
+      console.error("Voucher save failed:", e);
+    } finally {
+      setIsSavingVoucher(false);
+    }
+  };
 
   useEffect(() => {
     const raw = batch?.["Routine"] || batch?.["routine"] || batch?.["Class Routine"] || "";
@@ -1181,11 +1313,312 @@ export default function BatchDetailsView({ batch, allBatches, employees, isEditi
   };
 
   const renderFinancial = () => {
+    const feeVal = batch["Course Fee"] !== undefined ? batch["Course Fee"] : (courseFee || "0");
+    const fee = parseFloat(String(feeVal).replace(/[^0-9.]/g, "")) || 0;
+
+    const enrolledVal = batch["Student"] || batch["Enrolled"] || batch["Enrollments"] || "0";
+    const enrolled = parseInt(String(enrolledVal).replace(/[^0-9.]/g, ""), 10) || 0;
+
+    const grossRevenue = fee * enrolled;
+
+    const discountVal = batch["Discount"] || "0";
+    const discount = parseFloat(String(discountVal).replace(/[^0-9.]/g, "")) || 0;
+
+    const netRevenue = grossRevenue - (discount * enrolled);
+
+    const expensesVal = batch["Expenses"] || "0";
+    const expenses = calculatedExpensesSum !== undefined ? calculatedExpensesSum : (parseFloat(String(expensesVal).replace(/[^0-9.]/g, "")) || 0);
+
+    const netProfit = netRevenue - expenses;
+
+    const profitMargin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
+
     return (
-      <div className="flex flex-col items-center justify-center p-6 text-center border border-dashed border-slate-200 rounded-md bg-slate-50/50">
-        <Info className="w-8 h-8 text-slate-300 mb-2" />
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Financial Data</span>
-        <p className="text-[9px] text-slate-400 mt-1">Financial metrics for this batch are not available.</p>
+      <div className="space-y-3 pt-1">
+        {/* Main calculated cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs flex flex-col justify-between">
+            <div>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Gross Revenue</span>
+              <p className="text-[13px] font-bold text-slate-800 font-mono">৳ {grossRevenue.toLocaleString()}</p>
+            </div>
+            <span className="text-[8px] text-slate-400 mt-1 block italic">Course Fee × Enrolled</span>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs flex flex-col justify-between">
+            <div>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Net Revenue</span>
+              <p className="text-[13px] font-bold text-teal-600 font-mono">৳ {netRevenue.toLocaleString()}</p>
+            </div>
+            <span className="text-[8px] text-slate-400 mt-1 block italic">Gross − (Discount × Enrolled)</span>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs flex flex-col justify-between">
+            <div>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Net Profit</span>
+              <p className={cn("text-[13px] font-bold font-mono", netProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                {netProfit < 0 ? "− " : ""}৳ {Math.abs(netProfit).toLocaleString()}
+              </p>
+            </div>
+            <span className="text-[8px] text-slate-400 mt-1 block italic">Net Revenue − Expenses</span>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs flex flex-col justify-between">
+            <div>
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Profit Margin</span>
+              <p className={cn("text-[13px] font-extrabold font-mono", netProfit >= 0 ? "text-emerald-600" : "text-rose-600")}>
+                {profitMargin.toFixed(1)}%
+              </p>
+            </div>
+            <span className="text-[8px] text-slate-400 mt-1 block italic">% of Net Revenue</span>
+          </div>
+        </div>
+
+        {/* Breakdown details & inputs */}
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+          <div className="md:col-span-5 bg-white border border-slate-200 rounded-lg p-3 shadow-2xs">
+            {showVoucherForm ? (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-1.5 mb-2.5">
+                  <span className="text-[10px] font-extrabold text-teal-600 uppercase tracking-wider flex items-center gap-1">
+                    <Coins className="w-3.5 h-3.5" /> Add Voucher
+                  </span>
+                  <button 
+                    type="button" 
+                    onClick={() => setShowVoucherForm(false)}
+                    className="p-1 hover:bg-slate-100 rounded text-slate-400 hover:text-slate-600 transition-colors"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                
+                <div className="space-y-2.5">
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">Expenses Title</label>
+                    <input
+                      type="text"
+                      value={voucherTitle}
+                      onChange={(e) => setVoucherTitle(e.target.value)}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:border-teal-500 transition-all"
+                      placeholder="e.g. Room Rent, Server Cost"
+                      required
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">Amount (৳)</label>
+                      <input
+                        type="number"
+                        value={voucherAmount}
+                        onChange={(e) => setVoucherAmount(e.target.value)}
+                        className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:border-teal-500 transition-all"
+                        placeholder="0"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">Date</label>
+                      <input
+                        type="date"
+                        value={voucherDate}
+                        onChange={(e) => setVoucherDate(e.target.value)}
+                        className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:border-teal-500 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">Voucher / File Attachment</label>
+                    <div className="flex gap-1">
+                      <input
+                        type="text"
+                        value={voucherFileUrl}
+                        onChange={(e) => setVoucherFileUrl(e.target.value)}
+                        className="flex-1 text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1 outline-none focus:border-teal-500 transition-all"
+                        placeholder="https://example.com/voucher..."
+                      />
+                      <label className="bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded px-2 py-1 text-[10px] font-bold text-slate-600 cursor-pointer flex items-center justify-center gap-1 transition-colors">
+                        <Upload className="w-3 h-3" />
+                        <input
+                          type="file"
+                          onChange={handleVoucherFileUpload}
+                          className="hidden"
+                          disabled={isUploadingVoucher}
+                        />
+                      </label>
+                    </div>
+                    {isUploadingVoucher && (
+                      <span className="text-[8px] text-teal-600 flex items-center gap-1 mt-0.5 italic">
+                        <span className="w-2 h-2 rounded-full border border-teal-600 border-t-transparent animate-spin inline-block"></span> Uploading...
+                      </span>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">Tag (Auto-filled)</label>
+                    <input
+                      type="text"
+                      value={`${batch["Course Code"] || ""}-${batch["Batch Number"] || ""}`}
+                      className="w-full text-xs font-mono bg-slate-100 text-slate-500 border border-slate-200 rounded px-2 py-1 outline-none cursor-not-allowed"
+                      readOnly
+                    />
+                  </div>
+                  
+                  <div className="flex gap-2 pt-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setShowVoucherForm(false)}
+                      className="flex-1 text-[10px] font-bold text-slate-500 hover:text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 py-1.5 rounded transition-all"
+                    >
+                      CANCEL
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveVoucherSubmit}
+                      disabled={isSavingVoucher || !voucherTitle || !voucherAmount}
+                      className="flex-1 text-[10px] font-bold text-white bg-teal-600 hover:bg-teal-700 disabled:opacity-50 disabled:cursor-not-allowed py-1.5 rounded shadow-sm hover:shadow transition-all flex items-center justify-center gap-1"
+                    >
+                      {isSavingVoucher ? "SAVING..." : "SAVE VOUCHER"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block mb-2.5 pb-1 border-b border-slate-100">
+                  {isEditing ? "Modify Financial Inputs" : "Core Inputs"}
+                </span>
+                
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">Course Fee (৳)</label>
+                      <input
+                        type="text"
+                        value={batch["Course Fee"] !== undefined ? batch["Course Fee"] : (courseFee || "")}
+                        onChange={(e) => onSaveBatch && onSaveBatch({ ...batch, "Course Fee": e.target.value })}
+                        className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:border-teal-500 outline-none transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">Enrolled Students</label>
+                      <input
+                        type="number"
+                        value={batch["Student"] || ""}
+                        onChange={(e) => onSaveBatch && onSaveBatch({ ...batch, "Student": e.target.value })}
+                        className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:border-teal-500 outline-none transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">Discount Given (৳)</label>
+                      <input
+                        type="text"
+                        value={batch["Discount"] !== undefined ? batch["Discount"] : ""}
+                        onChange={(e) => onSaveBatch && onSaveBatch({ ...batch, "Discount": e.target.value })}
+                        className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:border-teal-500 outline-none transition-all"
+                        placeholder="0"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-0.5">Expenses (৳)</label>
+                      <div className="flex gap-1.5 items-center">
+                        <div className="flex-1 text-xs font-mono bg-slate-100 text-slate-600 border border-slate-200 rounded px-2.5 py-1.5">
+                          ৳ {expenses.toLocaleString()}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setVoucherTitle("");
+                            setVoucherAmount("");
+                            setVoucherFileUrl("");
+                            setVoucherDate(new Date().toISOString().split('T')[0]);
+                            setShowVoucherForm(true);
+                          }}
+                          className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-600 border border-teal-200 text-[10px] font-extrabold uppercase tracking-wider rounded transition-all flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5 animate-pulse text-teal-600" /> Add Voucher
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                      <span className="text-[11px] text-slate-500">Course Fee</span>
+                      <span className="text-[11px] font-semibold text-slate-800 font-mono">৳ {fee.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                      <span className="text-[11px] text-slate-500">Enrolled Students</span>
+                      <span className="text-[11px] font-semibold text-slate-800 font-mono">{enrolled}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-1 border-b border-slate-50">
+                      <span className="text-[11px] text-slate-500">Discount (per Student)</span>
+                      <span className="text-[11px] font-semibold text-rose-600 font-mono">− ৳ {discount.toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center justify-between py-1">
+                      <span className="text-[11px] text-slate-500">Expenses</span>
+                      <span className="text-[11px] font-semibold text-rose-600 font-mono">− ৳ {expenses.toLocaleString()}</span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="md:col-span-7 bg-white border border-slate-200 rounded-lg p-3 shadow-2xs">
+            <span className="text-[10px] font-extrabold text-slate-600 uppercase tracking-wider block mb-2.5 pb-1 border-b border-slate-100">
+              Financial Calculations Flow
+            </span>
+            <div className="space-y-1.5">
+              <div className="p-2 bg-slate-50 border border-slate-200/50 rounded-md">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs font-bold text-slate-700">Gross Revenue</span>
+                  <span className="text-xs font-extrabold text-slate-800 font-mono">৳ {grossRevenue.toLocaleString()}</span>
+                </div>
+                <p className="text-[9px] text-slate-400 leading-tight">
+                  Course Fee (<span className="font-mono">৳ {fee.toLocaleString()}</span>) × Enrolled (<span className="font-mono">{enrolled}</span>)
+                </p>
+              </div>
+
+              <div className="p-2 bg-slate-50 border border-slate-200/50 rounded-md">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs font-bold text-slate-700">Net Revenue</span>
+                  <span className="text-xs font-extrabold text-teal-700 font-mono">৳ {netRevenue.toLocaleString()}</span>
+                </div>
+                <p className="text-[9px] text-slate-400 leading-tight">
+                  Gross Revenue (<span className="font-mono">৳ {grossRevenue.toLocaleString()}</span>) − (Discount (<span className="font-mono">৳ {discount.toLocaleString()}</span>) × Enrolled (<span className="font-mono">{enrolled}</span>))
+                </p>
+              </div>
+
+              <div className="p-2 bg-slate-50 border border-slate-200/50 rounded-md">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs font-bold text-slate-700">Net Profit</span>
+                  <span className={cn("text-xs font-extrabold font-mono", netProfit >= 0 ? "text-emerald-700" : "text-rose-700")}>
+                    ৳ {netProfit.toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-[9px] text-slate-400 leading-tight">
+                  Net Revenue (<span className="font-mono">৳ {netRevenue.toLocaleString()}</span>) − Expenses (<span className="font-mono">৳ {expenses.toLocaleString()}</span>)
+                </p>
+              </div>
+
+              <div className="p-2 bg-slate-50 border border-slate-200/50 rounded-md">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="text-xs font-bold text-slate-700">Profit Margin</span>
+                  <span className={cn("text-xs font-extrabold font-mono", netProfit >= 0 ? "text-emerald-700" : "text-rose-700")}>
+                    {profitMargin.toFixed(1)}%
+                  </span>
+                </div>
+                <p className="text-[9px] text-slate-400 leading-tight">
+                  Net Profit (<span className="font-mono">৳ {netProfit.toLocaleString()}</span>) ÷ Net Revenue (<span className="font-mono">৳ {netRevenue.toLocaleString()}</span>) × 100
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -1193,8 +1626,8 @@ export default function BatchDetailsView({ batch, allBatches, employees, isEditi
   return (
     <div id="batch-details-view-container" className="bg-slate-50 h-full w-full flex-1 flex flex-col min-h-0 relative">
       <div className="p-4 pb-0 shrink-0">
-        <div className="flex items-center justify-start gap-3 mb-3 pb-2 border-b border-slate-200">
-          <div className="flex bg-slate-200/60 p-0.5 rounded border border-slate-200/40 shrink-0">
+        <div className="flex items-center justify-start gap-3 mb-3 pb-2 border-b border-slate-200 overflow-x-auto no-scrollbar max-w-full">
+          <div className="flex bg-slate-200/60 p-0.5 rounded border border-slate-200/40 shrink-0 overflow-x-auto no-scrollbar max-w-full">
             {(['info', 'routine', 'workflow', 'documents', 'financial'] as const).map(tab => {
               const isActive = activeTab === tab;
               return (
@@ -1207,7 +1640,7 @@ export default function BatchDetailsView({ batch, allBatches, employees, isEditi
                     }
                   }}
                   className={cn(
-                    "relative px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-colors cursor-pointer select-none focus:outline-none",
+                    "relative px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded transition-colors cursor-pointer select-none focus:outline-none shrink-0 whitespace-nowrap",
                     isActive ? "text-slate-800 font-extrabold" : "text-slate-500 hover:text-slate-700"
                   )}
                 >
@@ -1245,8 +1678,8 @@ export default function BatchDetailsView({ batch, allBatches, employees, isEditi
                   </div>
 
                   {isEditing ? (
-                    <div className="grid grid-cols-2 gap-3 pt-1 text-left">
-                      <div>
+                    <div className="grid grid-cols-2 md:grid-cols-12 gap-3 pt-1 text-left">
+                      <div className="col-span-1 md:col-span-3">
                         <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Start Date</label>
                         <input
                           type="date"
@@ -1255,7 +1688,7 @@ export default function BatchDetailsView({ batch, allBatches, employees, isEditi
                           className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1.5 focus:border-teal-500 outline-none"
                         />
                       </div>
-                      <div>
+                      <div className="col-span-1 md:col-span-3">
                         <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">End Date</label>
                         <input
                           type="date"
@@ -1264,19 +1697,65 @@ export default function BatchDetailsView({ batch, allBatches, employees, isEditi
                           className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1.5 focus:border-teal-500 outline-none"
                         />
                       </div>
+                      <div className="col-span-1 md:col-span-2">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Course Fee</label>
+                        <input
+                          type="text"
+                          value={batch["Course Fee"] !== undefined ? batch["Course Fee"] : (courseFee || "")}
+                          onChange={(e) => onSaveBatch && onSaveBatch({ ...batch, "Course Fee": e.target.value })}
+                          className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1.5 focus:border-teal-500 outline-none"
+                        />
+                      </div>
+                      <div className="col-span-1 md:col-span-2">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Discount</label>
+                        <input
+                          type="text"
+                          value={batch["Discount"] !== undefined ? batch["Discount"] : ""}
+                          onChange={(e) => onSaveBatch && onSaveBatch({ ...batch, "Discount": e.target.value })}
+                          className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1.5 focus:border-teal-500 outline-none"
+                        />
+                      </div>
+                      <div className="col-span-2 md:col-span-2">
+                        <label className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Student</label>
+                        <input
+                          type="number"
+                          value={batch["Student"] || ""}
+                          onChange={(e) => onSaveBatch && onSaveBatch({ ...batch, "Student": e.target.value })}
+                          className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded px-2 py-1.5 focus:border-teal-500 outline-none"
+                          placeholder="0"
+                        />
+                      </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-2 divide-x divide-slate-100 text-center">
-                      <div className="pr-2">
+                    <div className="grid grid-cols-2 md:grid-cols-12 divide-y md:divide-y-0 divide-slate-100 text-center gap-y-2.5 md:gap-y-0">
+                      <div className="col-span-1 md:col-span-3 px-1">
                         <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Start Date</p>
                         <p className="text-xs font-semibold text-slate-800 font-mono">
                           {batch["Start Date"] ? formatToMmmDdYyyy(batch["Start Date"]) : "—"}
                         </p>
                       </div>
-                      <div className="pl-2">
+                      <div className="col-span-1 md:col-span-3 px-1 md:border-l border-slate-100">
                         <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">End Date</p>
                         <p className="text-xs font-semibold text-slate-800 font-mono">
                           {batch["End Date"] ? formatToMmmDdYyyy(batch["End Date"]) : "—"}
+                        </p>
+                      </div>
+                      <div className="col-span-1 md:col-span-2 px-1 pt-2 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100">
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Course Fee</p>
+                        <p className="text-xs font-bold text-slate-800 font-mono">
+                          {batch["Course Fee"] !== undefined && batch["Course Fee"] !== "" ? `৳ ${Number(String(batch["Course Fee"]).replace(/[^0-9.]/g, '')).toLocaleString()}` : (courseFee !== undefined && courseFee !== "" ? `৳ ${Number(String(courseFee).replace(/[^0-9.]/g, '')).toLocaleString()}` : "—")}
+                        </p>
+                      </div>
+                      <div className="col-span-1 md:col-span-2 px-1 pt-2 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100">
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Discount</p>
+                        <p className="text-xs font-bold text-teal-600 font-mono">
+                          {batch["Discount"] ? `৳ ${Number(String(batch["Discount"]).replace(/[^0-9.]/g, '')).toLocaleString()}` : "—"}
+                        </p>
+                      </div>
+                      <div className="col-span-2 md:col-span-2 px-1 pt-2 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100">
+                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Student</p>
+                        <p className="text-xs font-bold text-slate-800 font-mono">
+                          {batch["Student"] || "0"}
                         </p>
                       </div>
                     </div>
@@ -1312,7 +1791,7 @@ export default function BatchDetailsView({ batch, allBatches, employees, isEditi
                     <div className="flex items-stretch justify-center gap-3 overflow-x-auto pb-1 pt-1 custom-scrollbar scroll-smooth">
                       {instructorsToRender.map((emp: any, i: number) => (
                         <div 
-                          key={i} 
+                           key={i} 
                           className={`flex flex-col items-center justify-center bg-slate-50/70 p-3 rounded-lg border border-slate-200/80 hover:border-teal-300 transition-all text-center ${
                             instructorsToRender.length === 1 ? 'w-full max-w-[180px] mx-auto' : 'min-w-[130px] max-w-[170px] shrink-0'
                           }`}
@@ -1358,30 +1837,6 @@ export default function BatchDetailsView({ batch, allBatches, employees, isEditi
                       <span className="text-xs italic text-slate-400">No instructor assigned</span>
                     </div>
                   )}
-                </div>
-
-                {/* Additional Info */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-1.5">
-                    <Info className="w-3.5 h-3.5 text-teal-600" />
-                    <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-wider">Info</span>
-                  </div>
-                  <div className="p-3 bg-white border border-slate-200 rounded-lg">
-                    <div className="flex justify-between items-center gap-2">
-                      <span className="text-xs text-slate-600 font-medium">Students Enrolled</span>
-                      {isEditing ? (
-                        <input
-                          type="number"
-                          value={batch["Student"] || ""}
-                          onChange={(e) => onSaveBatch && onSaveBatch({ ...batch, "Student": e.target.value })}
-                          className="w-24 text-xs font-mono font-bold text-teal-600 bg-slate-50 border border-slate-200 rounded px-2 py-1 focus:border-teal-500 outline-none text-right"
-                          placeholder="0"
-                        />
-                      ) : (
-                        <span className="text-xs font-bold text-teal-600 font-mono">{batch["Student"] || "—"}</span>
-                      )}
-                    </div>
-                  </div>
                 </div>
               </div>
             )}

@@ -114,7 +114,9 @@ export default function SideEdit({
     "End Date": "",
     "Student": "",
     "Instractor": "",
-    "Routine": ""
+    "Routine": "",
+    "Course Fee": "",
+    "Discount": ""
   });
   const [isSavingBatch, setIsSavingBatch] = useState(false);
   const [localCreatedBatches, setLocalCreatedBatches] = useState<any[]>([]);
@@ -164,7 +166,9 @@ export default function SideEdit({
       "End Date": "",
       "Student": "",
       "Instractor": "",
-      "Routine": ""
+      "Routine": "",
+      "Course Fee": formData["Course Fee"] || "",
+      "Discount": ""
     });
     setEditingBatch(null);
     setShowAddBatch(true);
@@ -185,7 +189,9 @@ export default function SideEdit({
       "End Date": formatDateForInput(batch["End Date"]),
       "Student": batch["Student"] || "",
       "Instractor": batch["Instractor"] || batch["Instructor"] || "",
-      "Routine": batch["Routine"] || batch["routine"] || ""
+      "Routine": batch["Routine"] || batch["routine"] || "",
+      "Course Fee": batch["Course Fee"] !== undefined ? batch["Course Fee"] : (formData["Course Fee"] || ""),
+      "Discount": batch["Discount"] || ""
     });
     setEditingBatch(batch);
     setShowAddBatch(true);
