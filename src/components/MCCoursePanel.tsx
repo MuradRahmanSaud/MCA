@@ -19,6 +19,13 @@ interface MCCoursePanelProps {
   onSaveDocument?: (formData: any, editingRow: any | null) => Promise<void>;
   workflowData?: any[];
   onExpand?: (course: any) => void;
+  expensesData?: any[];
+  onSaveExpense?: (formData: any, editingRow: any | null) => Promise<void>;
+  expensesHeaders?: string[];
+  batchHeaders?: string[];
+  documentHeaders?: string[];
+  extraFormProps?: any;
+  [key: string]: any;
 }
 
 export default function MCCoursePanel({ 
@@ -33,7 +40,14 @@ export default function MCCoursePanel({
   allDocuments,
   onSaveDocument,
   workflowData = [],
-  onExpand
+  onExpand,
+  expensesData,
+  onSaveExpense,
+  expensesHeaders,
+  batchHeaders,
+  documentHeaders,
+  extraFormProps,
+  ...rest
 }: MCCoursePanelProps) {
   const [isEditing, setIsEditing] = useState(!initialData);
 
@@ -71,6 +85,17 @@ export default function MCCoursePanel({
     );
   }
 
+  const mergedExtraProps = {
+    onSaveBatch: onSaveBatch || extraFormProps?.onSaveBatch,
+    onSaveDocument: onSaveDocument || extraFormProps?.onSaveDocument,
+    batchHeaders: batchHeaders || extraFormProps?.batchHeaders || ["Batch Number", "Start Date", "End Date", "Student", "Instractor", "Course Fee", "Discount"],
+    documentHeaders: documentHeaders || extraFormProps?.documentHeaders || ["Date", "Documents Title", "File Link", "Tag"],
+    expensesData: expensesData || extraFormProps?.expensesData,
+    onSaveExpense: onSaveExpense || extraFormProps?.onSaveExpense,
+    expensesHeaders: expensesHeaders || extraFormProps?.expensesHeaders,
+    ...extraFormProps
+  };
+
   return (
     <MCCourseDetails
       isOpen={isOpen}
@@ -81,12 +106,7 @@ export default function MCCoursePanel({
       batches={allBatches}
       documents={allDocuments}
       workflowData={workflowData}
-      extraFormProps={{
-        onSaveBatch: onSaveBatch,
-        onSaveDocument: onSaveDocument,
-        batchHeaders: ["Batch Number", "Start Date", "End Date", "Student", "Instractor", "Course Fee", "Discount"],
-        documentHeaders: ["Date", "Documents Title", "File Link", "Tag"]
-      }}
+      extraFormProps={mergedExtraProps}
       initialExpanded={false}
       headers={headers}
     />

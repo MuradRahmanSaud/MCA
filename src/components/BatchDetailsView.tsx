@@ -1400,7 +1400,6 @@ export default function BatchDetailsView({
               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Gross Revenue</span>
               <p className="text-[13px] font-bold text-slate-800 font-mono">৳ {grossRevenue.toLocaleString()}</p>
             </div>
-            <span className="text-[8px] text-slate-400 mt-1 block italic">Course Fee × Enrolled</span>
           </div>
 
           <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs flex flex-col justify-between">
@@ -1408,7 +1407,6 @@ export default function BatchDetailsView({
               <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block mb-0.5">Net Revenue</span>
               <p className="text-[13px] font-bold text-teal-600 font-mono">৳ {netRevenue.toLocaleString()}</p>
             </div>
-            <span className="text-[8px] text-slate-400 mt-1 block italic">Gross − (Discount × Enrolled)</span>
           </div>
 
           <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs flex flex-col justify-between">
@@ -1418,7 +1416,6 @@ export default function BatchDetailsView({
                 {netProfit < 0 ? "− " : ""}৳ {Math.abs(netProfit).toLocaleString()}
               </p>
             </div>
-            <span className="text-[8px] text-slate-400 mt-1 block italic">Net Revenue − Expenses</span>
           </div>
 
           <div className="bg-white border border-slate-200 rounded-lg p-2.5 shadow-2xs flex flex-col justify-between">
@@ -1428,7 +1425,6 @@ export default function BatchDetailsView({
                 {profitMargin.toFixed(1)}%
               </p>
             </div>
-            <span className="text-[8px] text-slate-400 mt-1 block italic">% of Net Revenue</span>
           </div>
         </div>
 
@@ -1613,7 +1609,7 @@ export default function BatchDetailsView({
                       <span className="text-[11px] font-semibold text-slate-800 font-mono">{enrolled}</span>
                     </div>
                     <div className="flex items-center justify-between py-1 border-b border-slate-50">
-                      <span className="text-[11px] text-slate-500">Discount (per Student)</span>
+                      <span className="text-[11px] text-slate-500">Discount</span>
                       <span className="text-[11px] font-semibold text-rose-600 font-mono">− ৳ {discount.toLocaleString()}</span>
                     </div>
                     <div className="flex items-center justify-between py-1">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Edit2, Globe, Clock, Calendar, Users, CheckCircle, Target, BookOpen, AlertCircle, Save, Loader2, TrendingUp, Briefcase, GripVertical, Tag, Percent, Banknote, CreditCard, Wallet, PieChart, Trash2, Minimize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip as RechartsTooltip, BarChart as RechartsBarChart, Bar, XAxis, YAxis } from 'recharts';
 import EmployeeMultiSelect from './EmployeeMultiSelect';
 import SearchableSingleSelect from './SearchableSingleSelect';
 import MCBatchPanel from './MCBatchPanel';
@@ -198,7 +199,7 @@ export default function MCCourseDetails({
   const [activeSidebarTab, setActiveSidebarTab] = useState<'workflow' | 'documents' | 'financial_overview' | 'batches' | 'info'>('workflow');
 
   useEffect(() => {
-    if (isExpanded && (activeSidebarTab === 'batches' || activeSidebarTab === 'info')) {
+    if (isExpanded && activeSidebarTab === 'batches') {
       setActiveSidebarTab('workflow');
     }
   }, [isExpanded, activeSidebarTab]);
@@ -379,7 +380,8 @@ export default function MCCourseDetails({
     let totalEnrolled = 0;
     let totalGrossRevenue = 0;
     let totalDiscount = 0;
-    let totalExpenses = 0;
+    let totalBatchDiscountSum = 0;
+    let totalBatchExpensesSum = 0;
 
     courseBatches.forEach(b => {
       const feeVal = b["Course Fee"] !== undefined && b["Course Fee"] !== "" ? b["Course Fee"] : (data?.["Course Fee"] || "0");
@@ -397,9 +399,56 @@ export default function MCCourseDetails({
       totalCourseFee += fee;
       totalEnrolled += enrolled;
       totalGrossRevenue += (fee * enrolled);
+      totalBatchDiscountSum += discount;
       totalDiscount += (discount * enrolled);
-      totalExpenses += expenses;
+      totalBatchExpensesSum += expenses;
     });
+
+    // Calculate expense summation from extraFormProps?.expensesData matching course & batch tags
+    const expensesList = extraFormProps?.expensesData || [];
+    const courseCode = String(data?.['Course Code'] || "").trim().toLowerCase();
+    const cleanCourseCode = courseCode.replace(/[^a-z0-9]/g, '');
+
+    let tagExpensesSum = 0;
+    let hasTagExpensesMatch = false;
+
+    if (Array.isArray(expensesList) && expensesList.length > 0) {
+      const validTags = new Set<string>();
+      if (courseCode) validTags.add(courseCode);
+
+      courseBatches.forEach(b => {
+        const bCode = String(b['Course Code'] || data?.['Course Code'] || "").trim().toLowerCase();
+        const bNum = String(b['Batch Number'] || b['Batch'] || "").trim().toLowerCase();
+        if (bCode && bNum) {
+          validTags.add(`${bCode}-${bNum}`);
+          validTags.add(`${bCode} ${bNum}`);
+        }
+        const bTag = String(b['Tag'] || b['Tag Name'] || "").trim().toLowerCase();
+        if (bTag) validTags.add(bTag);
+      });
+
+      expensesList.forEach(item => {
+        const itemTag = String(item["Tag"] || item["Tag Name"] || "").trim().toLowerCase();
+        if (!itemTag) return;
+
+        const cleanItemTag = itemTag.replace(/[^a-z0-9]/g, '');
+        let isMatch = false;
+
+        if (validTags.has(itemTag)) {
+          isMatch = true;
+        } else if (cleanCourseCode.length >= 2 && cleanItemTag.startsWith(cleanCourseCode)) {
+          isMatch = true;
+        }
+
+        if (isMatch) {
+          const amt = parseFloat(String(item["Amount"] || "0").replace(/[^0-9.]/g, "")) || 0;
+          tagExpensesSum += amt;
+          hasTagExpensesMatch = true;
+        }
+      });
+    }
+
+    const totalExpenses = (hasTagExpensesMatch || tagExpensesSum > 0) ? tagExpensesSum : totalBatchExpensesSum;
 
     const netRevenue = totalGrossRevenue - totalDiscount;
     const netProfit = netRevenue - totalExpenses;
@@ -409,13 +458,14 @@ export default function MCCourseDetails({
       courseFee: totalCourseFee,
       enrolled: totalEnrolled,
       grossRevenue: totalGrossRevenue,
+      batchDiscountSum: totalBatchDiscountSum,
       discount: totalDiscount,
       netRevenue,
       expenses: totalExpenses,
       netProfit,
       profitMargin
     };
-  }, [courseBatches, data]);
+  }, [courseBatches, data, extraFormProps?.expensesData]);
 
   const handleSelectBatchWithAutoSave = async (clickedIndex: number, clickedBatchKey: string) => {
     const previousKey = inlineEditingBatchKey;
@@ -853,7 +903,7 @@ export default function MCCourseDetails({
                     return (
                       <div className={cn(
                         "w-full relative bg-teal-900 flex items-center justify-center overflow-hidden rounded-lg transition-all duration-200",
-                        "min-h-[140px] md:min-h-[150px]"
+                        isEditing ? "min-h-[140px] md:min-h-[148px]" : "min-h-[110px] md:min-h-[120px]"
                       )}>
                         {displayUrl ? (
                           <img
@@ -1507,6 +1557,23 @@ export default function MCCourseDetails({
             <div className="bg-white border-b border-slate-100 shrink-0 p-2">
               <div className="flex h-9 p-1 gap-1 bg-slate-50 rounded-lg border border-slate-100 overflow-x-auto no-scrollbar">
                 <button 
+                  onClick={() => setActiveSidebarTab('info')}
+                  className={cn(
+                    "flex-1 min-w-[70px] text-[10px] font-bold uppercase tracking-[0.05em] transition-all relative rounded-md py-1",
+                    activeSidebarTab === 'info' ? "text-white" : "text-slate-500 hover:text-slate-700"
+                  )}
+                >
+                  <span className="relative z-10">Info</span>
+                  {activeSidebarTab === 'info' && (
+                    <motion.div 
+                      layoutId="activeSidebarTab"
+                      className="absolute inset-0 bg-teal-600 rounded-md shadow-sm"
+                      transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                    />
+                  )}
+                </button>
+
+                <button 
                   onClick={() => {
                     setActiveSidebarTab('workflow');
                     setDocumentFilter(null);
@@ -1536,25 +1603,6 @@ export default function MCCourseDetails({
                   >
                     <span className="relative z-10">Batches</span>
                     {activeSidebarTab === 'batches' && (
-                      <motion.div 
-                        layoutId="activeSidebarTab"
-                        className="absolute inset-0 bg-teal-600 rounded-md shadow-sm"
-                        transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
-                      />
-                    )}
-                  </button>
-                )}
-
-                {!isExpanded && (
-                  <button 
-                    onClick={() => setActiveSidebarTab('info')}
-                    className={cn(
-                      "flex-1 min-w-[70px] text-[10px] font-bold uppercase tracking-[0.05em] transition-all relative rounded-md py-1",
-                      activeSidebarTab === 'info' ? "text-white" : "text-slate-500 hover:text-slate-700"
-                    )}
-                  >
-                    <span className="relative z-10">Info</span>
-                    {activeSidebarTab === 'info' && (
                       <motion.div 
                         layoutId="activeSidebarTab"
                         className="absolute inset-0 bg-teal-600 rounded-md shadow-sm"
@@ -2117,22 +2165,57 @@ export default function MCCourseDetails({
                       <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider block pb-1 border-b border-slate-100">
                         Cumulative Inputs Summation
                       </span>
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
-                          <span className="text-[10.5px] text-slate-500">Total Course Fee Sum</span>
-                          <span className="text-[11px] font-bold text-slate-800 font-mono">৳ {courseFinancials.courseFee.toLocaleString()}</span>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 space-y-1.5">
+                          <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                            <span className="text-[10.5px] text-slate-500">Total Course Fee</span>
+                            <span className="text-[11px] font-bold text-slate-800 font-mono">৳ {courseFinancials.courseFee.toLocaleString()}</span>
+                          </div>
+                          <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                            <span className="text-[10.5px] text-slate-500">Total Enrolled Students</span>
+                            <span className="text-[11px] font-bold text-slate-800 font-mono">{courseFinancials.enrolled}</span>
+                          </div>
+                          <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
+                            <span className="text-[10.5px] text-slate-500">Total Discount</span>
+                            <span className="text-[11px] font-bold text-rose-600 font-mono">− ৳ {courseFinancials.batchDiscountSum.toLocaleString()}</span>
+                          </div>
+                          <div className="flex items-center justify-between py-0.5">
+                            <span className="text-[10.5px] text-slate-500">Total Expenses</span>
+                            <span className="text-[11px] font-bold text-rose-600 font-mono">− ৳ {courseFinancials.expenses.toLocaleString()}</span>
+                          </div>
                         </div>
-                        <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
-                          <span className="text-[10.5px] text-slate-500">Total Enrolled Students</span>
-                          <span className="text-[11px] font-bold text-slate-800 font-mono">{courseFinancials.enrolled}</span>
-                        </div>
-                        <div className="flex items-center justify-between py-0.5 border-b border-slate-50">
-                          <span className="text-[10.5px] text-slate-500">Total Discount (∑ (Discount × Enrolled))</span>
-                          <span className="text-[11px] font-bold text-rose-600 font-mono">− ৳ {courseFinancials.discount.toLocaleString()}</span>
-                        </div>
-                        <div className="flex items-center justify-between py-0.5">
-                          <span className="text-[10.5px] text-slate-500">Total Expenses</span>
-                          <span className="text-[11px] font-bold text-rose-600 font-mono">− ৳ {courseFinancials.expenses.toLocaleString()}</span>
+
+                        {/* Chart on the right side of amounts */}
+                        <div className="w-36 sm:w-44 h-28 flex-none flex items-center justify-center border-l border-slate-100 pl-2">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <RechartsPieChart>
+                              <Pie
+                                data={[
+                                  { name: 'Course Fee', value: courseFinancials.courseFee, color: '#2563eb' },
+                                  { name: 'Discount', value: courseFinancials.batchDiscountSum, color: '#f43f5e' },
+                                  { name: 'Expenses', value: courseFinancials.expenses, color: '#f59e0b' }
+                                ].filter(d => d.value > 0)}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius={18}
+                                outerRadius={36}
+                                paddingAngle={3}
+                                dataKey="value"
+                              >
+                                {[
+                                  { name: 'Course Fee', value: courseFinancials.courseFee, color: '#2563eb' },
+                                  { name: 'Discount', value: courseFinancials.batchDiscountSum, color: '#f43f5e' },
+                                  { name: 'Expenses', value: courseFinancials.expenses, color: '#f59e0b' }
+                                ].filter(d => d.value > 0).map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <RechartsTooltip
+                                formatter={(value: any) => [`৳ ${Number(value).toLocaleString()}`, '']}
+                                contentStyle={{ fontSize: '10px', borderRadius: '6px', padding: '4px 8px', backgroundColor: '#ffffff', borderColor: '#e2e8f0' }}
+                              />
+                            </RechartsPieChart>
+                          </ResponsiveContainer>
                         </div>
                       </div>
                     </div>
@@ -2142,29 +2225,61 @@ export default function MCCourseDetails({
                       <span className="text-[11px] font-extrabold text-slate-600 uppercase tracking-wider block pb-1 border-b border-slate-100">
                         Cumulative Flow Breakdown
                       </span>
-                      <div className="space-y-1">
-                        <div className="p-1.5 bg-slate-50 border border-slate-100 rounded">
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="text-[10px] font-bold text-slate-700">Gross Revenue</span>
-                            <span className="text-[10px] font-extrabold text-slate-800 font-mono">৳ {courseFinancials.grossRevenue.toLocaleString()}</span>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 space-y-1">
+                          <div className="p-1.5 bg-slate-50 border border-slate-100 rounded">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="text-[10px] font-bold text-slate-700">Gross Revenue</span>
+                              <span className="text-[10px] font-extrabold text-slate-800 font-mono">৳ {courseFinancials.grossRevenue.toLocaleString()}</span>
+                            </div>
+                            <p className="text-[8px] text-slate-400">Sum of (Fee × Enrolled) of all batches</p>
                           </div>
-                          <p className="text-[8px] text-slate-400">Sum of (Fee × Enrolled) of all batches</p>
+                          <div className="p-1.5 bg-slate-50 border border-slate-100 rounded">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="text-[10px] font-bold text-slate-700">Net Revenue</span>
+                              <span className="text-[10px] font-extrabold text-teal-700 font-mono">৳ {courseFinancials.netRevenue.toLocaleString()}</span>
+                            </div>
+                            <p className="text-[8px] text-slate-400 font-mono">Gross (৳{courseFinancials.grossRevenue.toLocaleString()}) − Discount (৳{courseFinancials.discount.toLocaleString()})</p>
+                          </div>
+                          <div className="p-1.5 bg-slate-50 border border-slate-100 rounded">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="text-[10px] font-bold text-slate-700">Net Profit</span>
+                              <span className={cn("text-[10px] font-extrabold font-mono", courseFinancials.netProfit >= 0 ? "text-emerald-700" : "text-rose-700")}>
+                                ৳ {courseFinancials.netProfit.toLocaleString()}
+                              </span>
+                            </div>
+                            <p className="text-[8px] text-slate-400 font-mono">Net (৳{courseFinancials.netRevenue.toLocaleString()}) − Expenses (৳{courseFinancials.expenses.toLocaleString()})</p>
+                          </div>
                         </div>
-                        <div className="p-1.5 bg-slate-50 border border-slate-100 rounded">
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="text-[10px] font-bold text-slate-700">Net Revenue</span>
-                            <span className="text-[10px] font-extrabold text-teal-700 font-mono">৳ {courseFinancials.netRevenue.toLocaleString()}</span>
-                          </div>
-                          <p className="text-[8px] text-slate-400 font-mono">Gross (৳{courseFinancials.grossRevenue.toLocaleString()}) − Discount (৳{courseFinancials.discount.toLocaleString()})</p>
-                        </div>
-                        <div className="p-1.5 bg-slate-50 border border-slate-100 rounded">
-                          <div className="flex items-center justify-between mb-0.5">
-                            <span className="text-[10px] font-bold text-slate-700">Net Profit</span>
-                            <span className={cn("text-[10px] font-extrabold font-mono", courseFinancials.netProfit >= 0 ? "text-emerald-700" : "text-rose-700")}>
-                              ৳ {courseFinancials.netProfit.toLocaleString()}
-                            </span>
-                          </div>
-                          <p className="text-[8px] text-slate-400 font-mono">Net (৳{courseFinancials.netRevenue.toLocaleString()}) − Expenses (৳{courseFinancials.expenses.toLocaleString()})</p>
+
+                        {/* Chart on the right side of amounts */}
+                        <div className="w-36 sm:w-44 h-32 flex-none flex items-center justify-center border-l border-slate-100 pl-2">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <RechartsBarChart
+                              data={[
+                                { name: 'Gross', value: courseFinancials.grossRevenue, color: '#475569' },
+                                { name: 'Net Rev', value: courseFinancials.netRevenue, color: '#0d9488' },
+                                { name: 'Profit', value: courseFinancials.netProfit, color: courseFinancials.netProfit >= 0 ? '#10b981' : '#f43f5e' }
+                              ]}
+                              margin={{ top: 10, right: 8, left: 8, bottom: 0 }}
+                            >
+                              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#64748b' }} interval={0} />
+                              <YAxis hide />
+                              <RechartsTooltip
+                                formatter={(value: any) => [`৳ ${Number(value).toLocaleString()}`, 'Amount']}
+                                contentStyle={{ fontSize: '10px', borderRadius: '6px', padding: '4px 8px', backgroundColor: '#ffffff', borderColor: '#e2e8f0' }}
+                              />
+                              <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={16}>
+                                {[
+                                  { name: 'Gross', value: courseFinancials.grossRevenue, color: '#475569' },
+                                  { name: 'Net Rev', value: courseFinancials.netRevenue, color: '#0d9488' },
+                                  { name: 'Profit', value: courseFinancials.netProfit, color: courseFinancials.netProfit >= 0 ? '#10b981' : '#f43f5e' }
+                                ].map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Bar>
+                            </RechartsBarChart>
+                          </ResponsiveContainer>
                         </div>
                       </div>
                     </div>
