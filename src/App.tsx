@@ -251,7 +251,7 @@ export default function App() {
   } = useGoogleSheet({
     gid: expensesGid,
     localStorageKey: "expenses_data",
-    fallbackHeaders: ["Date", "Expenses Title", "Amount", "Voucher", "Tag"]
+    fallbackHeaders: ["Date", "Expenses Title", "Amount", "Voucher", "Tag", "Ref"]
   });
 
   // Workflow Sheet
@@ -759,7 +759,57 @@ export default function App() {
       const cleaned = h.toLowerCase().trim();
       return cleaned === "expenses title" || cleaned === "title" || cleaned === "expense title";
     }) || "Expenses Title";
-    await saveExpense(formData, editingRow, idKey);
+
+    const refHeader = expensesHeaders.find(h => {
+      const cleaned = h.toLowerCase().trim();
+      return cleaned === "ref" || cleaned === "ref name";
+    }) || "Ref";
+
+    let finalFormData = { ...formData };
+    if (!finalFormData[refHeader]) {
+      const tag = String(finalFormData["Tag"] || "").trim();
+      if (tag) {
+        let courseCode = "";
+        let batchNo = "";
+        if (tag.includes("-")) {
+          const parts = tag.split("-");
+          if (parts.length > 1) {
+            batchNo = parts[parts.length - 1]?.trim() || "";
+            courseCode = parts.slice(0, parts.length - 1).join("-")?.trim() || "";
+          } else {
+            courseCode = tag;
+            batchNo = "01";
+          }
+        } else {
+          courseCode = tag;
+          batchNo = "01";
+        }
+
+        const targetTag = tag.toLowerCase();
+        const sameTagExpenses = expensesData.filter(item => {
+          const itemTag = String(item["Tag"] || "").trim().toLowerCase();
+          return itemTag === targetTag;
+        });
+
+        let maxSerial = 0;
+        sameTagExpenses.forEach(item => {
+          const refVal = String(item[refHeader] || "");
+          if (refVal.includes("/")) {
+            const parts = refVal.split("/");
+            const lastPart = parts[parts.length - 1];
+            const serial = parseInt(lastPart, 10);
+            if (!isNaN(serial) && serial > maxSerial) {
+              maxSerial = serial;
+            }
+          }
+        });
+
+        const nextSerial = maxSerial + 1;
+        finalFormData[refHeader] = `${courseCode}/${batchNo}/${nextSerial}`;
+      }
+    }
+
+    await saveExpense(finalFormData, editingRow, idKey);
   };
 
   const handleExpenseDelete = async (row: any) => {

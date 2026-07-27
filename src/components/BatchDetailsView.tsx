@@ -476,15 +476,47 @@ export default function BatchDetailsView({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const courseCode = batch?.["Course Code"] || "";
+    const batchNo = batch?.["Batch Number"] || "";
+    if (!courseCode || !batchNo) {
+      alert("Course Code or Batch Number is missing. Cannot determine folder path.");
+      return;
+    }
+
     setIsUploadingVoucher(true);
     const formDataUpload = new FormData();
-    const formattedDate = formatDateForFileName(voucherDate);
-    const title = voucherTitle || "Expense";
-    const newFileName = formattedDate ? `${title} - ${formattedDate} - ${file.name}` : `${title} - ${file.name}`;
-    
+
+    // Calculate Ref number
+    const refHeader = "Ref";
+    const tag = `${courseCode}-${batchNo}`;
+    const targetTag = tag.toLowerCase();
+    const sameTagExpenses = (expensesData || []).filter(item => {
+      const itemTag = String(item["Tag"] || "").trim().toLowerCase();
+      return itemTag === targetTag;
+    });
+
+    let maxSerial = 0;
+    sameTagExpenses.forEach(item => {
+      const refVal = String(item[refHeader] || item["Ref Name"] || "");
+      if (refVal.includes("/")) {
+        const parts = refVal.split("/");
+        const lastPart = parts[parts.length - 1];
+        const serial = parseInt(lastPart, 10);
+        if (!isNaN(serial) && serial > maxSerial) {
+          maxSerial = serial;
+        }
+      }
+    });
+
+    const nextSerial = maxSerial + 1;
+    const refNumber = `${courseCode}/${batchNo}/${nextSerial}`;
+
+    const fileLocationPrefix = FOLDER_LOCATIONS.BANNER.replace(/\/Banner$/, "") || "Main Folder";
+    const customFolderPath = `${fileLocationPrefix}/MC Course/${courseCode}/${batchNo}/Expense Voucher`;
+
     formDataUpload.append("file", file);
-    formDataUpload.append("folderPath", FOLDER_LOCATIONS.EXPENSES_VOUCHER);
-    formDataUpload.append("departmentName", newFileName.replace(/\.[^/.]+$/, "")); 
+    formDataUpload.append("folderPath", customFolderPath);
+    formDataUpload.append("departmentName", refNumber); 
 
     try {
       const response = await axios.post("/api/upload", formDataUpload, { timeout: 60000 });
@@ -512,13 +544,39 @@ export default function BatchDetailsView({
     setIsSavingVoucher(true);
     try {
       if (onSaveExpense) {
-        const tag = `${batch?.["Course Code"] || ""}-${batch?.["Batch Number"] || ""}`;
+        const courseCode = batch?.["Course Code"] || "";
+        const batchNo = batch?.["Batch Number"] || "";
+        const tag = `${courseCode}-${batchNo}`;
+        const refHeader = "Ref";
+
+        const sameTagExpenses = (expensesData || []).filter(item => {
+          const itemTag = String(item["Tag"] || "").trim().toLowerCase();
+          return itemTag === tag.toLowerCase();
+        });
+
+        let maxSerial = 0;
+        sameTagExpenses.forEach(item => {
+          const refVal = String(item[refHeader] || item["Ref Name"] || "");
+          if (refVal.includes("/")) {
+            const parts = refVal.split("/");
+            const lastPart = parts[parts.length - 1];
+            const serial = parseInt(lastPart, 10);
+            if (!isNaN(serial) && serial > maxSerial) {
+              maxSerial = serial;
+            }
+          }
+        });
+
+        const nextSerial = maxSerial + 1;
+        const refNumber = `${courseCode}/${batchNo}/${nextSerial}`;
+
         const newVoucher = {
           "Date": voucherDate || new Date().toISOString().split('T')[0],
           "Expenses Title": voucherTitle,
           "Amount": voucherAmount,
           "Voucher": voucherFileUrl,
-          "Tag": tag
+          "Tag": tag,
+          "Ref": refNumber
         };
         await onSaveExpense(newVoucher, null);
         setShowVoucherForm(false);

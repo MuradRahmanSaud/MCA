@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { X, Save, Trash2, Calendar, Link as LinkIcon, Upload, Loader2, Coins, Receipt, Type, Tag } from "lucide-react";
+import { X, Save, Trash2, Calendar, Link as LinkIcon, Upload, Loader2, Coins, Receipt, Type, Tag, Hash } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { cn } from "../lib/utils";
 import axios from "axios";
@@ -13,6 +13,7 @@ interface ExpensesPanelProps {
   initialData?: any;
   headers: string[];
   onDirtyChange?: (isDirty: boolean) => void;
+  allData?: any[];
 }
 
 export default function ExpensesPanel({ 
@@ -22,7 +23,8 @@ export default function ExpensesPanel({
   onDelete, 
   initialData, 
   headers, 
-  onDirtyChange 
+  onDirtyChange,
+  allData
 }: ExpensesPanelProps) {
   const [formData, setFormData] = useState<any>({});
   const [isEditing, setIsEditing] = useState(!initialData);
@@ -74,17 +76,70 @@ export default function ExpensesPanel({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const tag = String(formData["Tag"] || "").trim();
+    if (!tag) {
+      alert("Please select or enter a Tag (Batch No) first so that the folder path and Ref number can be generated correctly.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
     setIsUploading(true);
     const formDataUpload = new FormData();
     
-    // Format filename: Expense - Date (Mmm DD, YYYY) - File Name
-    const formattedDate = formatDateForFileName(formData["Date"]);
-    const title = formData["Expenses Title"] || "Expense";
-    const newFileName = formattedDate ? `${title} - ${formattedDate} - ${file.name}` : `${title} - ${file.name}`;
-    
+    // Extract Course Code and Batch No from Tag
+    let courseCode = "";
+    let batchNo = "";
+    if (tag.includes("-")) {
+      const parts = tag.split("-");
+      if (parts.length > 1) {
+        batchNo = parts[parts.length - 1]?.trim() || "";
+        courseCode = parts.slice(0, parts.length - 1).join("-")?.trim() || "";
+      } else {
+        courseCode = tag;
+        batchNo = "01";
+      }
+    } else {
+      courseCode = tag;
+      batchNo = "01";
+    }
+
+    // Calculate Ref number
+    const refHeader = headers.find(h => {
+      const cleaned = h.toLowerCase().trim();
+      return cleaned === "ref" || cleaned === "ref name";
+    }) || "Ref";
+
+    let refNumber = formData[refHeader] || "";
+    if (!refNumber) {
+      const targetTag = tag.toLowerCase();
+      const sameTagExpenses = (allData || []).filter(item => {
+        const itemTag = String(item["Tag"] || "").trim().toLowerCase();
+        return itemTag === targetTag;
+      });
+
+      let maxSerial = 0;
+      sameTagExpenses.forEach(item => {
+        const refVal = String(item[refHeader] || "");
+        if (refVal.includes("/")) {
+          const parts = refVal.split("/");
+          const lastPart = parts[parts.length - 1];
+          const serial = parseInt(lastPart, 10);
+          if (!isNaN(serial) && serial > maxSerial) {
+            maxSerial = serial;
+          }
+        }
+      });
+
+      const nextSerial = maxSerial + 1;
+      refNumber = `${courseCode}/${batchNo}/${nextSerial}`;
+    }
+
+    const fileLocationPrefix = FOLDER_LOCATIONS.BANNER.replace(/\/Banner$/, "") || "Main Folder";
+    const customFolderPath = `${fileLocationPrefix}/MC Course/${courseCode}/${batchNo}/Expense Voucher`;
+
     formDataUpload.append("file", file);
-    formDataUpload.append("folderPath", FOLDER_LOCATIONS.EXPENSES_VOUCHER);
-    formDataUpload.append("departmentName", newFileName.replace(/\.[^/.]+$/, "")); 
+    formDataUpload.append("folderPath", customFolderPath);
+    formDataUpload.append("departmentName", refNumber); 
 
     try {
       const response = await axios.post("/api/upload", formDataUpload, { timeout: 60000 });
@@ -98,7 +153,17 @@ export default function ExpensesPanel({
             viewUrl = `https://drive.google.com/file/d/${fileIdMatch[1]}/view`;
           }
         }
-        handleChange("Voucher", viewUrl);
+        
+        // Update both Voucher and Ref number in state
+        setFormData(prev => ({
+          ...prev,
+          "Voucher": viewUrl,
+          [refHeader]: refNumber
+        }));
+
+        if (onDirtyChange) {
+          onDirtyChange(true);
+        }
       }
     } catch (error) {
       console.error("Upload failed:", error);
@@ -232,18 +297,20 @@ export default function ExpensesPanel({
               </motion.div>
             ) : (
               <div className="space-y-4">
-              {headers.map((header) => {
+               {headers.map((header) => {
                 const isVoucher = header.toLowerCase().includes("voucher");
                 const isDate = header.toLowerCase().includes("date");
                 const isAmount = header.toLowerCase().includes("amount");
                 const isTitle = header.toLowerCase().includes("title");
                 const isTag = header.toLowerCase().includes("tag");
+                const isRef = header.toLowerCase().trim() === "ref" || header.toLowerCase().trim() === "ref name";
 
                 let Icon = Receipt;
                 if (isDate) Icon = Calendar;
                 if (isVoucher) Icon = LinkIcon;
                 if (isAmount) Icon = Coins;
                 if (isTag) Icon = Tag;
+                if (isRef) Icon = Hash;
 
                 return (
                   <div key={header} className="space-y-1">
@@ -258,8 +325,12 @@ export default function ExpensesPanel({
                           step={isAmount ? "0.01" : undefined}
                           value={formData[header] || ""}
                           onChange={(e) => handleChange(header, e.target.value)}
-                          className="w-full px-3 py-2 text-xs border border-gray-200 rounded focus:border-teal-500 outline-none transition-all"
-                          placeholder={`Enter ${header}...`}
+                          className={cn(
+                            "w-full px-3 py-2 text-xs border border-gray-200 rounded focus:border-teal-500 outline-none transition-all",
+                            isRef && "bg-slate-50 text-slate-500 cursor-not-allowed"
+                          )}
+                          placeholder={isRef ? "(Auto-generated)" : `Enter ${header}...`}
+                          readOnly={isRef}
                         />
                         {isVoucher && (
                           <>
